@@ -1,0 +1,142 @@
+{
+  "info": {
+    "name": "Jugnu Saloon Public API",
+    "description": "Postman collection for Jugnu Saloon public REST API endpoints (Products, Services, Categories, Appointment Booking, Contact Form)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Fetch Products Catalog",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/products",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "products"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Fetch Services Catalog",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/services",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "services"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Fetch Service Categories",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/service-categories",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "service-categories"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Book Appointment",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"customer_name\": \"Michael Scott\",\n  \"customer_phone\": \"03001112233\",\n  \"customer_email\": \"michael@example.com\",\n  \"appointment_date\": \"2026-08-20\",\n  \"start_time\": \"14:00\",\n  \"service_ids\": [1, 2],\n  \"notes\": \"Prefers senior stylist.\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/appointments",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "appointments"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Submit Contact Form",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Jane Smith\",\n  \"email\": \"jane@example.com\",\n  \"phone\": \"03009876543\",\n  \"subject\": \"General Inquiry\",\n  \"message\": \"I would like to inquire about wedding hair packages.\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/contact",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "contact"
+          ]
+        }
+      }
+    }
+  ]
+}

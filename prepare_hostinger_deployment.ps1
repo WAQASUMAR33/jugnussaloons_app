@@ -18,37 +18,41 @@ foreach ($file in $requiredFiles) {
 }
 Write-Host "All required core files verified!" -ForegroundColor Green
 
-Write-Host "=== 3. Creating hostinger_deploy.zip Package ===" -ForegroundColor Cyan
-$destination = Join-Path (Get-Location) "hostinger_deploy.zip"
-$stagingDir = Join-Path (Get-Location) "scratch\staging"
 
-if (Test-Path $stagingDir) {
-    Remove-Item $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
+Write-Host "=== 3. Creating 'deploy' Folder, 'saloon.zip', and 'hostinger_deploy.zip' Package ===" -ForegroundColor Cyan
+$deployDir = Join-Path (Get-Location) "deploy"
+$saloonZip = Join-Path (Get-Location) "saloon.zip"
+$hostingerZip = Join-Path (Get-Location) "hostinger_deploy.zip"
+
+if (Test-Path $deployDir) {
+    Remove-Item $deployDir -Recurse -Force -ErrorAction SilentlyContinue
 }
-New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+New-Item -ItemType Directory -Path $deployDir -Force | Out-Null
 
-$filesToCopy = Get-ChildItem -Path . -Exclude "node_modules", ".git", ".env", "scratch", "tests", ".phpunit.cache", "hostinger_deploy.zip", "hostinger_deploy_latest.zip", "prepare_hostinger_deployment.ps1"
+$filesToCopy = Get-ChildItem -Path . -Exclude "node_modules", ".git", ".env", ".phpunit.cache", "hostinger_deploy.zip", "saloon.zip", "prepare_hostinger_deployment.ps1", "deploy"
 
 foreach ($item in $filesToCopy) {
-    Copy-Item -Path $item.FullName -Destination $stagingDir -Recurse -Force
+    Copy-Item -Path $item.FullName -Destination $deployDir -Recurse -Force
 }
 
-if (Test-Path $destination) {
-    Remove-Item $destination -Force -ErrorAction SilentlyContinue
-}
+# Remove existing zip files
+if (Test-Path $saloonZip) { Remove-Item $saloonZip -Force -ErrorAction SilentlyContinue }
+if (Test-Path $hostingerZip) { Remove-Item $hostingerZip -Force -ErrorAction SilentlyContinue }
 
-# Use tar.exe to force POSIX forward slash '/' directory entries for Linux/Hostinger
-tar -acf $destination -C $stagingDir .
+# Use System.IO.Compression.ZipFile for fast, reliable zip packaging
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::CreateFromDirectory($deployDir, $saloonZip)
+[System.IO.Compression.ZipFile]::CreateFromDirectory($deployDir, $hostingerZip)
 
-Remove-Item $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
-
-
-
-if (Test-Path $destination) {
-    $zipSize = (Get-Item $destination).Length / 1MB
-    Write-Host ("=== Hostinger Deployment Package Created Successfully! ===") -ForegroundColor Green
-    Write-Host ("Package: hostinger_deploy.zip ({0:N2} MB)" -f $zipSize) -ForegroundColor Yellow
+if ((Test-Path $saloonZip) -and (Test-Path $hostingerZip)) {
+    $saloonSize = (Get-Item $saloonZip).Length / 1MB
+    $hostingerSize = (Get-Item $hostingerZip).Length / 1MB
+    Write-Host ("=== Hostinger Deployment Packages Created Successfully! ===") -ForegroundColor Green
+    Write-Host ("Deploy Folder: d:\saloon_app\deploy") -ForegroundColor Yellow
+    Write-Host ("saloon.zip Package: ({0:N2} MB)" -f $saloonSize) -ForegroundColor Yellow
+    Write-Host ("hostinger_deploy.zip Package: ({0:N2} MB)" -f $hostingerSize) -ForegroundColor Yellow
 } else {
-    Write-Error "Failed to create deployment zip."
+    Write-Error "Failed to create deployment zip packages."
     exit 1
 }
+

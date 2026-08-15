@@ -22,8 +22,14 @@ class Account extends Model
         'card_no',
         'card_type',
         'emp_type',
+        'username',
+        'password',
         'salary',
         'balance',
+    ];
+
+    protected $hidden = [
+        'password',
     ];
 
     protected $casts = [

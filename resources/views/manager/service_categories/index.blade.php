@@ -6,7 +6,7 @@
 <div x-data="{ 
     createModalOpen: false,
     editModalOpen: false,
-    editCategory: { id: null, title: '', description: '' }
+    editCategory: { id: null, title: '', description: '', image: null }
 }" class="space-y-6">
 
     <!-- Header & Action Bar -->
@@ -57,6 +57,7 @@
                 <thead>
                     <tr class="bg-slate-50 border-b border-slate-200 text-slate-500 text-[11px] font-extrabold uppercase tracking-wider">
                         <th class="py-4 px-6">ID</th>
+                        <th class="py-4 px-6">Image</th>
                         <th class="py-4 px-6">Category Title</th>
                         <th class="py-4 px-6">Description</th>
                         <th class="py-4 px-6">Assigned Services</th>
@@ -68,6 +69,15 @@
                     <tr class="hover:bg-slate-50/60 transition-colors">
                         <td class="py-4 px-6 font-mono font-bold text-xs text-slate-400">
                             #{{ $cat->id }}
+                        </td>
+                        <td class="py-4 px-6">
+                            @if($cat->image)
+                                <img src="{{ asset($cat->image) }}" alt="{{ $cat->title }}" class="w-12 h-12 rounded object-cover border border-slate-200 shadow-sm">
+                            @else
+                                <div class="w-12 h-12 rounded bg-indigo-50 border border-slate-200 flex items-center justify-center text-indigo-400">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                                </div>
+                            @endif
                         </td>
                         <td class="py-4 px-6 font-bold text-slate-900">
                             {{ $cat->title }}
@@ -82,7 +92,7 @@
                         </td>
                         <td class="py-4 px-6 text-right">
                             <div class="flex items-center justify-end gap-2">
-                                <button @click="editCategory = { id: {{ $cat->id }}, title: '{{ addslashes($cat->title) }}', description: '{{ addslashes($cat->description ?? '') }}' }; editModalOpen = true" 
+                                <button @click="editCategory = { id: {{ $cat->id }}, title: '{{ addslashes($cat->title) }}', description: '{{ addslashes($cat->description ?? '') }}', image: '{{ $cat->image ? asset($cat->image) : '' }}' }; editModalOpen = true" 
                                         class="p-2 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 transition-colors" title="Edit Category">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
                                 </button>
@@ -99,7 +109,7 @@
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="5" class="py-12 text-center text-slate-400">
+                        <td colspan="6" class="py-12 text-center text-slate-400">
                             <p class="text-sm font-semibold">No service categories created yet.</p>
                         </td>
                     </tr>
@@ -128,7 +138,7 @@
                 </button>
             </div>
 
-            <form method="POST" action="{{ route('manager.service-categories.store') }}" class="space-y-4">
+            <form method="POST" action="{{ route('manager.service-categories.store') }}" enctype="multipart/form-data" class="space-y-4">
                 @csrf
                 
                 <div>
@@ -141,6 +151,13 @@
                     <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Description (Optional)</label>
                     <textarea name="description" rows="3" placeholder="Category details and treatment guidelines..." 
                               class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600"></textarea>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Category Image (Optional)</label>
+                    <input type="file" name="image" accept="image/*" 
+                           class="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-xs text-slate-600 file:mr-4 file:py-1.5 file:px-3 file:border-0 file:text-xs file:font-bold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer">
+                    <p class="text-[11px] text-slate-400 mt-1">Recommended format: JPG, PNG, WEBP, or SVG (Max 4MB).</p>
                 </div>
 
                 <div class="pt-4 flex justify-end gap-3 border-t border-slate-100">
@@ -170,7 +187,7 @@
                 </button>
             </div>
 
-            <form :action="'{{ url('manager/service-categories') }}/' + editCategory.id" method="POST" class="space-y-4">
+            <form :action="'{{ url('manager/service-categories') }}/' + editCategory.id" method="POST" enctype="multipart/form-data" class="space-y-4">
                 @csrf
                 @method('PUT')
                 
@@ -184,6 +201,19 @@
                     <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Description (Optional)</label>
                     <textarea name="description" rows="3" x-model="editCategory.description" 
                               class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600"></textarea>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Category Image (Optional)</label>
+                    <template x-if="editCategory.image">
+                        <div class="mb-2 flex items-center gap-3 p-2 bg-slate-50 border border-slate-200 rounded">
+                            <img :src="editCategory.image" class="w-12 h-12 object-cover rounded border border-slate-200 shadow-sm">
+                            <span class="text-xs text-slate-500 font-semibold">Current Image</span>
+                        </div>
+                    </template>
+                    <input type="file" name="image" accept="image/*" 
+                           class="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-xs text-slate-600 file:mr-4 file:py-1.5 file:px-3 file:border-0 file:text-xs file:font-bold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer">
+                    <p class="text-[11px] text-slate-400 mt-1">Select a new image to replace the current one.</p>
                 </div>
 
                 <div class="pt-4 flex justify-end gap-3 border-t border-slate-100">

@@ -35,9 +35,22 @@ class ServiceCategoryController extends Controller
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:255', 'unique:service_categories,title'],
             'description' => ['nullable', 'string', 'max:1000'],
+            'image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,gif,webp,svg', 'max:4096'],
         ]);
 
-        ServiceCategory::create($validated);
+        $imagePath = null;
+        if ($request->hasFile('image')) {
+            $file = $request->file('image');
+            $fileName = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+            $path = $file->storeAs('categories', $fileName, 'public');
+            $imagePath = 'storage/' . $path;
+        }
+
+        ServiceCategory::create([
+            'title' => $validated['title'],
+            'description' => $validated['description'] ?? null,
+            'image' => $imagePath,
+        ]);
 
         return redirect()->route('manager.service-categories.index')
             ->with('success', 'Saloon service category created successfully!');
@@ -51,9 +64,25 @@ class ServiceCategoryController extends Controller
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:255', 'unique:service_categories,title,' . $serviceCategory->id],
             'description' => ['nullable', 'string', 'max:1000'],
+            'image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,gif,webp,svg', 'max:4096'],
         ]);
 
-        $serviceCategory->update($validated);
+        $imagePath = $serviceCategory->image;
+        if ($request->hasFile('image')) {
+            if ($serviceCategory->image && file_exists(public_path($serviceCategory->image))) {
+                @unlink(public_path($serviceCategory->image));
+            }
+            $file = $request->file('image');
+            $fileName = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+            $path = $file->storeAs('categories', $fileName, 'public');
+            $imagePath = 'storage/' . $path;
+        }
+
+        $serviceCategory->update([
+            'title' => $validated['title'],
+            'description' => $validated['description'] ?? null,
+            'image' => $imagePath,
+        ]);
 
         return redirect()->route('manager.service-categories.index')
             ->with('success', 'Saloon service category updated successfully!');
@@ -64,6 +93,10 @@ class ServiceCategoryController extends Controller
      */
     public function destroy(ServiceCategory $serviceCategory)
     {
+        if ($serviceCategory->image && file_exists(public_path($serviceCategory->image))) {
+            @unlink(public_path($serviceCategory->image));
+        }
+
         $serviceCategory->delete();
 
         return redirect()->route('manager.service-categories.index')

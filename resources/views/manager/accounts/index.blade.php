@@ -11,7 +11,7 @@
     categories: {{ json_encode($categories->map(fn($c) => ['id' => (int)$c->id, 'title' => $c->title])) }},
     createCategoryId: '',
     activeAccount: { id: null, name: '', balance: 0, category: '' },
-    editAccount: { id: null, account_category_id: '', name: '', father_name: '', address: '', date_of_birth: '', date_of_anniversary: '', phone_no1: '', phone_no2: '', card_no: '', card_type: '', emp_type: 'junior', salary: 0, balance: 0 },
+    editAccount: { id: null, account_category_id: '', name: '', father_name: '', address: '', date_of_birth: '', date_of_anniversary: '', phone_no1: '', phone_no2: '', card_no: '', card_type: '', username: '', emp_type: 'junior', salary: 0, balance: 0 },
     isCustomerCategory(catId) {
         if (!catId) return false;
         const cat = this.categories.find(c => c.id == catId);
@@ -105,6 +105,9 @@
                         <td class="py-4 px-6 font-bold text-xs text-slate-400">#{{ $account->id }}</td>
                         <td class="py-4 px-6">
                             <p class="font-bold text-slate-900 leading-tight">{{ $account->name }}</p>
+                            @if($account->username)
+                                <p class="text-xs font-semibold text-indigo-600">@ {{ $account->username }}</p>
+                            @endif
                             @if($account->father_name)
                                 <p class="text-xs text-slate-500">S/O, D/O: {{ $account->father_name }}</p>
                             @endif
@@ -207,6 +210,7 @@
                                             phone_no2: '{{ addslashes($account->phone_no2 ?? '') }}', 
                                             card_no: '{{ addslashes($account->card_no ?? '') }}', 
                                             card_type: '{{ addslashes($account->card_type ?? '') }}', 
+                                            username: '{{ addslashes($account->username ?? '') }}', 
                                             emp_type: '{{ addslashes($account->emp_type ?? 'junior') }}',
                                             salary: {{ $account->salary ?? 0 }},
                                             balance: {{ $account->balance }} 
@@ -310,6 +314,20 @@
                     <div class="flex items-center gap-2 text-indigo-900 font-bold text-xs uppercase border-b border-indigo-200 pb-2">
                         <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3 3 0 00-3 3b2 2 0 002 2h2m4-3a3 3 0 013 3b2 2 0 01-2 2h-2"></path></svg>
                         <span>Customer Membership & Personal Details</span>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Username (Customer Login)</label>
+                            <input type="text" name="username" placeholder="e.g. sarah_j" 
+                                   class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Password</label>
+                            <input type="password" name="password" placeholder="••••••••" 
+                                   class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
+                        </div>
                     </div>
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -457,6 +475,20 @@
                     <div class="flex items-center gap-2 text-indigo-900 font-bold text-xs uppercase border-b border-indigo-200 pb-2">
                         <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3 3 0 00-3 3b2 2 0 002 2h2m4-3a3 3 0 013 3b2 2 0 01-2 2h-2"></path></svg>
                         <span>Customer Membership & Personal Details</span>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Username (Customer Login)</label>
+                            <input type="text" name="username" x-model="editAccount.username" placeholder="e.g. sarah_j" 
+                                   class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">New Password</label>
+                            <input type="password" name="password" placeholder="Leave blank to keep unchanged" 
+                                   class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
+                        </div>
                     </div>
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
