@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\AccountCategory;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
 
 class AccountController extends Controller
 {
@@ -22,6 +24,7 @@ class AccountController extends Controller
         if ($search) {
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('username', 'like', "%{$search}%")
                   ->orWhere('phone_no1', 'like', "%{$search}%")
                   ->orWhere('phone_no2', 'like', "%{$search}%")
                   ->orWhere('card_no', 'like', "%{$search}%")
@@ -55,6 +58,8 @@ class AccountController extends Controller
             'phone_no2' => ['nullable', 'string', 'max:50'],
             'card_no' => ['nullable', 'string', 'max:50'],
             'card_type' => ['nullable', 'string', 'in:No Card,Silver,Gold,Platinum'],
+            'username' => ['nullable', 'string', 'max:255', 'unique:accounts,username'],
+            'password' => ['nullable', 'string', 'min:6'],
             'emp_type' => ['nullable', 'string', 'in:junior,senior,Junior,Senior'],
             'salary' => ['nullable', 'numeric', 'min:0'],
             'balance' => ['nullable', 'numeric'],
@@ -76,6 +81,8 @@ class AccountController extends Controller
             'phone_no2' => $validated['phone_no2'] ?? null,
             'card_no' => $isCustomer ? ($validated['card_no'] ?? null) : null,
             'card_type' => $isCustomer ? ($validated['card_type'] ?? null) : null,
+            'username' => $isCustomer ? ($validated['username'] ?? null) : null,
+            'password' => $isCustomer && !empty($validated['password']) ? Hash::make($validated['password']) : null,
             'emp_type' => $isEmployee ? (strtolower($validated['emp_type'] ?? '') ?: 'junior') : null,
             'salary' => $isEmployee ? (float) ($validated['salary'] ?? 0.00) : 0.00,
             'balance' => (float) ($validated['balance'] ?? 0.00),
@@ -101,6 +108,8 @@ class AccountController extends Controller
             'phone_no2' => ['nullable', 'string', 'max:50'],
             'card_no' => ['nullable', 'string', 'max:50'],
             'card_type' => ['nullable', 'string', 'in:No Card,Silver,Gold,Platinum'],
+            'username' => ['nullable', 'string', 'max:255', Rule::unique('accounts', 'username')->ignore($account->id)],
+            'password' => ['nullable', 'string', 'min:6'],
             'emp_type' => ['nullable', 'string', 'in:junior,senior,Junior,Senior'],
             'salary' => ['nullable', 'numeric', 'min:0'],
             'balance' => ['nullable', 'numeric'],
@@ -111,7 +120,7 @@ class AccountController extends Controller
         $isCustomer = str_contains($titleLower, 'customer') || str_contains($titleLower, 'client') || str_contains($titleLower, 'vip') || str_contains($titleLower, 'member');
         $isEmployee = str_contains($titleLower, 'employee') || str_contains($titleLower, 'staff') || str_contains($titleLower, 'stylist') || str_contains($titleLower, 'worker');
 
-        $account->update([
+        $updateData = [
             'account_category_id' => $validated['account_category_id'],
             'name' => $validated['name'],
             'father_name' => $validated['father_name'] ?? null,
@@ -122,10 +131,21 @@ class AccountController extends Controller
             'phone_no2' => $validated['phone_no2'] ?? null,
             'card_no' => $isCustomer ? ($validated['card_no'] ?? null) : null,
             'card_type' => $isCustomer ? ($validated['card_type'] ?? null) : null,
+            'username' => $isCustomer ? ($validated['username'] ?? null) : null,
             'emp_type' => $isEmployee ? (strtolower($validated['emp_type'] ?? '') ?: 'junior') : null,
             'salary' => $isEmployee ? (float) ($validated['salary'] ?? 0.00) : 0.00,
             'balance' => (float) ($validated['balance'] ?? 0.00),
-        ]);
+        ];
+
+        if ($isCustomer) {
+            if (!empty($validated['password'])) {
+                $updateData['password'] = Hash::make($validated['password']);
+            }
+        } else {
+            $updateData['password'] = null;
+        }
+
+        $account->update($updateData);
 
         return redirect()->route('manager.accounts.index')
             ->with('success', 'Account updated successfully!');
@@ -185,5 +205,22 @@ class AccountController extends Controller
         $label = $validated['transaction_type'] === 'payment' ? 'Payment' : 'Receiving';
         return redirect()->route('manager.accounts.index')
             ->with('success', "{$label} recorded successfully! Ledger entry generated & account balance updated.");
+    }
+
+    /**
+     * Reset password for an account.
+     */
+    public function resetPassword(Request $request, Account $account)
+    {
+        $validated = $request->validate([
+            'password' => ['required', 'string', 'min:6', 'confirmed'],
+        ]);
+
+        $account->update([
+            'password' => Hash::make($validated['password']),
+        ]);
+
+        return redirect()->route('manager.accounts.index')
+            ->with('success', "Password for \"{$account->name}\" reset successfully!");
     }
 }

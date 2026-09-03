@@ -22,13 +22,7 @@
 <body class="h-full flex items-center justify-center p-4 bg-gradient-to-br from-slate-100 via-indigo-50/50 to-slate-100 text-slate-800 antialiased min-h-screen">
 
     <div x-data="{ 
-        showPassword: false,
-        email: '{{ old('email', '') }}',
-        password: '',
-        quickLogin(roleEmail) {
-            this.email = roleEmail;
-            this.password = 'password123';
-        }
+        showPassword: false
     }" class="w-full max-w-md my-auto">
 
 
@@ -72,8 +66,8 @@
                             <!-- Mail SVG -->
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
                         </span>
-                        <input id="email" type="email" name="email" x-model="email" required autofocus 
-                               placeholder="admin@example.com"
+                        <input id="email" type="email" name="email" value="{{ old('email') }}" required autofocus 
+                               placeholder="Enter your email"
                                class="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 focus:bg-white transition-all text-slate-900 placeholder-slate-400">
                     </div>
                 </div>
@@ -86,8 +80,8 @@
                             <!-- Lock SVG -->
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
                         </span>
-                        <input id="password" :type="showPassword ? 'text' : 'password'" name="password" x-model="password" required 
-                               placeholder="••••••••"
+                        <input id="password" :type="showPassword ? 'text' : 'password'" name="password" required 
+                               placeholder="Enter your password"
                                class="w-full pl-10 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 focus:bg-white transition-all text-slate-900 placeholder-slate-400">
                         
                         <button type="button" @click="showPassword = !showPassword" 
@@ -125,28 +119,6 @@
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
                 </button>
             </form>
-
-            <!-- Quick Demo Login Presets -->
-            <div class="pt-4 border-t border-slate-100 space-y-2.5">
-                <p class="text-[11px] font-bold text-slate-400 text-center uppercase tracking-wider">Quick Demo Sign-In Presets:</p>
-                <div class="grid grid-cols-3 gap-2">
-                    <button type="button" @click="quickLogin('admin@example.com')" 
-                            class="py-2.5 px-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold text-center border border-rose-200 transition-colors flex items-center justify-center gap-1">
-                        <span>👑</span>
-                        <span>Admin</span>
-                    </button>
-                    <button type="button" @click="quickLogin('manager@example.com')" 
-                            class="py-2.5 px-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold text-center border border-amber-200 transition-colors flex items-center justify-center gap-1">
-                        <span>💼</span>
-                        <span>Manager</span>
-                    </button>
-                    <button type="button" @click="quickLogin('customer@example.com')" 
-                            class="py-2.5 px-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold text-center border border-emerald-200 transition-colors flex items-center justify-center gap-1">
-                        <span>✂️</span>
-                        <span>Customer</span>
-                    </button>
-                </div>
-            </div>
 
         </div>
 

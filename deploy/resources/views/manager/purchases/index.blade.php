@@ -8,6 +8,9 @@
     viewModalOpen: false,
     selectedPurchase: null,
     suppliersList: {{ json_encode($suppliers) }},
+    productsList: {{ json_encode($products) }},
+    storesList: {{ json_encode($stores) }},
+    selectedStoreId: '{{ $defaultStore->id ?? ($stores->first()->id ?? '') }}',
     selectedSupplierId: '',
     supplierSearchTerm: '',
     supplierDropdownOpen: false,
@@ -15,6 +18,15 @@
         { product_id: '', search_term: '', open: false, quantity: 1, unit_price: 0, sale_price: 0, subtotal: 0 }
     ],
     paidAmount: 0,
+
+    getProductStoreStock(prod, storeId) {
+        if (!prod) return 0;
+        if (prod.store_stocks && Array.isArray(prod.store_stocks)) {
+            const found = prod.store_stocks.find(s => s.store_id == (storeId || this.selectedStoreId));
+            if (found) return parseInt(found.stock) || 0;
+        }
+        return parseInt(prod.stock) || 0;
+    },
     
     getFilteredSuppliersList() {
         if (!this.supplierSearchTerm || this.supplierSearchTerm.trim() === '') return this.suppliersList;
@@ -85,7 +97,7 @@
         </button>
     </div>
 
-    <!-- Search & Filter -->
+    <!-- Filter & Search Bar -->
     <div class="bg-white p-4 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <form method="GET" action="{{ route('manager.purchases.index') }}" class="flex-1 flex flex-col sm:flex-row gap-3">
             <div class="relative flex-1">
@@ -96,10 +108,22 @@
                        class="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-amber-600 focus:bg-white transition-all">
             </div>
 
+            <!-- Store Filter -->
+            <div class="w-full sm:w-64">
+                <select name="store_id" class="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 text-xs font-bold focus:ring-2 focus:ring-amber-600 focus:bg-white transition-all">
+                    <option value="">All Stores (Global)</option>
+                    @foreach($stores as $s)
+                        <option value="{{ $s->id }}" {{ (string)request('store_id') === (string)$s->id ? 'selected' : '' }}>
+                            🏬 {{ $s->name }} {{ $s->is_default ? '(Default)' : '' }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
+
             <button type="submit" class="px-5 py-2.5 bg-slate-900 text-white font-bold text-xs hover:bg-slate-800 transition-colors">
                 Search Purchases
             </button>
-            @if($search)
+            @if($search || request('store_id'))
                 <a href="{{ route('manager.purchases.index') }}" class="px-4 py-2.5 bg-slate-100 text-slate-600 font-bold text-xs hover:bg-slate-200 flex items-center justify-center">
                     Reset
                 </a>
@@ -114,6 +138,7 @@
                 <thead>
                     <tr class="bg-slate-50 border-b border-slate-200 text-slate-500 text-[11px] font-extrabold uppercase tracking-wider">
                         <th class="py-4 px-6">Invoice #</th>
+                        <th class="py-4 px-6">Destination Store</th>
                         <th class="py-4 px-6">Supplier Account</th>
                         <th class="py-4 px-6">Purchase Date</th>
                         <th class="py-4 px-6">Total Amount</th>
@@ -127,6 +152,12 @@
                     <tr class="hover:bg-slate-50/60 transition-colors">
                         <td class="py-4 px-6 font-mono font-bold text-xs text-amber-700">
                             {{ $purchase->invoice_no }}
+                        </td>
+                        <td class="py-4 px-6">
+                            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 text-slate-800 text-xs font-bold border border-slate-200">
+                                <span>🏬</span>
+                                <span>{{ $purchase->store ? $purchase->store->name : ($defaultStore->name ?? 'Main Store') }}</span>
+                            </span>
                         </td>
                         <td class="py-4 px-6">
                             <p class="font-bold text-slate-900 leading-tight">{{ $purchase->supplier->name ?? 'Unknown Supplier' }}</p>
@@ -187,9 +218,12 @@
             <form method="POST" action="{{ route('manager.purchases.store') }}" class="space-y-4">
                 @csrf
                 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <!-- Supplier Account Selection -->
                     <div class="relative" @click.outside="supplierDropdownOpen = false">
-                        <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Select Supplier Account</label>
+                        <label class="block text-xs font-bold text-slate-700 uppercase mb-1">
+                            Supplier Account <span class="text-rose-600">*</span>
+                        </label>
                         <input type="hidden" name="account_id" :value="selectedSupplierId" required>
                         
                         <div class="relative">
@@ -197,9 +231,9 @@
                                    x-model="supplierSearchTerm" 
                                    @focus="supplierDropdownOpen = true" 
                                    @input="supplierDropdownOpen = true; selectedSupplierId = ''" 
-                                   placeholder="🔍 Search supplier name..." 
+                                   placeholder="🔍 Search supplier..." 
                                    required
-                                   class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-amber-600">
+                                   class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-amber-600">
                             <span class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                             </span>
@@ -225,10 +259,29 @@
                         </div>
                     </div>
 
+                    <!-- Destination Store / Branch Selector -->
                     <div>
-                        <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Purchase Date</label>
+                        <label class="block text-xs font-bold text-slate-700 uppercase mb-1">
+                            Destination Store <span class="text-rose-600">*</span>
+                        </label>
+                        <select name="store_id" x-model="selectedStoreId" required 
+                                class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 text-xs font-bold focus:ring-2 focus:ring-amber-600">
+                            @foreach($stores as $s)
+                                <option value="{{ $s->id }}" {{ $s->is_default ? 'selected' : '' }}>
+                                    🏬 {{ $s->name }} ({{ $s->code }}) {{ $s->is_default ? '— Default' : '' }}
+                                </option>
+                            @endforeach
+                        </select>
+                        <span class="text-[10px] text-slate-400 font-medium">Stock will be received at this branch</span>
+                    </div>
+
+                    <!-- Purchase Date -->
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 uppercase mb-1">
+                            Purchase Date <span class="text-rose-600">*</span>
+                        </label>
                         <input type="date" name="purchase_date" value="{{ date('Y-m-d') }}" required 
-                               class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-amber-600">
+                               class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-amber-600">
                     </div>
                 </div>
 
@@ -279,7 +332,7 @@
                                                  class="p-2.5 hover:bg-amber-50 cursor-pointer flex items-center justify-between transition-colors text-xs">
                                                 <div>
                                                     <p class="font-bold text-slate-900" x-text="prod.title"></p>
-                                                    <p class="text-[10px] text-slate-400">Current Stock: <span class="font-bold text-slate-700" x-text="prod.stock"></span></p>
+                                                    <p class="text-[10px] text-slate-400">Branch Stock: <span class="font-bold text-slate-700" x-text="getProductStoreStock(prod, selectedStoreId)"></span></p>
                                                 </div>
                                                 <span class="font-extrabold text-amber-700" x-text="prod.price"></span>
                                             </div>
@@ -372,9 +425,15 @@
             </div>
 
             <div class="space-y-4">
-                <div class="p-3 bg-slate-50 border border-slate-200">
-                    <p class="text-xs font-bold text-slate-500 uppercase">Supplier</p>
-                    <p class="text-sm font-extrabold text-slate-900" x-text="selectedPurchase.supplier ? selectedPurchase.supplier.name : 'Unknown'"></p>
+                <div class="grid grid-cols-2 gap-3 bg-slate-50 p-3 border border-slate-200">
+                    <div>
+                        <p class="text-[10px] font-bold text-slate-500 uppercase">Supplier Account</p>
+                        <p class="text-sm font-extrabold text-slate-900" x-text="selectedPurchase.supplier ? selectedPurchase.supplier.name : 'Unknown'"></p>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-bold text-slate-500 uppercase">Destination Store</p>
+                        <p class="text-sm font-extrabold text-amber-700" x-text="selectedPurchase.store ? selectedPurchase.store.name : 'Main Store'"></p>
+                    </div>
                 </div>
 
                 <div class="border border-slate-200 overflow-hidden">

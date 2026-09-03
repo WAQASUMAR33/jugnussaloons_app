@@ -80,7 +80,7 @@
 
     <!-- Filter Form Bar (WEB ONLY) -->
     <div class="bg-white p-5 border border-slate-200 shadow-sm print:hidden">
-        <form method="GET" action="{{ route('manager.reports.stock') }}" class="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+        <form method="GET" action="{{ route('manager.reports.stock') }}" class="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end">
             <div>
                 <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Search Product</label>
                 <input type="text" name="search" value="{{ $search }}" placeholder="Type product name..." 
@@ -88,9 +88,21 @@
             </div>
 
             <div>
+                <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Store / Branch Filter</label>
+                <select name="store_id" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-600">
+                    <option value="">All Stores (System-Wide)</option>
+                    @foreach($stores as $s)
+                        <option value="{{ $s->id }}" {{ (string)$storeId === (string)$s->id ? 'selected' : '' }}>
+                            🏬 {{ $s->name }} {{ $s->is_default ? '(Default)' : '' }}
+                        </option>
+                    @endforeach
+                </select>
+            </div>
+
+            <div>
                 <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Stock Status Filter</label>
                 <select name="status" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-600">
-                    <option value="">All Inventory Products</option>
+                    <option value="">All Inventory Levels</option>
                     <option value="healthy" {{ $status == 'healthy' ? 'selected' : '' }}>Healthy Stock (> 5 units)</option>
                     <option value="low" {{ $status == 'low' ? 'selected' : '' }}>Low Stock Warning (1-5 units)</option>
                     <option value="out" {{ $status == 'out' ? 'selected' : '' }}>Out of Stock (0 units)</option>
@@ -101,14 +113,14 @@
                 <button type="submit" class="flex-1 py-2.5 bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 transition-colors shadow-xs">
                     Filter Stock
                 </button>
+                @if($search || $storeId || $status)
                 <a href="{{ route('manager.reports.stock') }}" class="px-4 py-2.5 bg-slate-100 text-slate-600 font-bold text-xs hover:bg-slate-200 flex items-center justify-center">
                     Reset
                 </a>
+                @endif
             </div>
         </form>
     </div>
-
-
 
     <!-- Inventory Data Table -->
     <div class="bg-white border border-slate-200 shadow-sm overflow-hidden">
@@ -126,7 +138,7 @@
                         <th class="py-3.5 px-4">Original Price</th>
                         <th class="py-3.5 px-4">Discount</th>
                         <th class="py-3.5 px-4">Retail Price</th>
-                        <th class="py-3.5 px-4">Current Stock Units</th>
+                        <th class="py-3.5 px-4">Stock Units</th>
                         <th class="py-3.5 px-4">Inventory Cost Value</th>
                         <th class="py-3.5 px-4">Total Retail Value</th>
                         <th class="py-3.5 px-4 text-right">Status</th>
@@ -134,9 +146,24 @@
                 </thead>
                 <tbody class="divide-y divide-slate-100 font-medium">
                     @forelse($products as $prod)
+                    @php
+                        $displayStock = $storeId ? $prod->stockInStore($storeId) : $prod->stock;
+                    @endphp
                     <tr class="hover:bg-slate-50/60 transition-colors">
                         <td class="py-3.5 px-4 font-mono font-bold text-slate-400">#{{ $prod->id }}</td>
-                        <td class="py-3.5 px-4 font-bold text-slate-900">{{ $prod->title }}</td>
+                        <td class="py-3.5 px-4 font-bold text-slate-900">
+                            <div>{{ $prod->title }}</div>
+                            @if(!$storeId && $stores->count() > 1)
+                                <div class="flex flex-wrap gap-1 mt-1">
+                                    @foreach($stores as $st)
+                                        @php $sQty = $prod->stockInStore($st->id); @endphp
+                                        <span class="text-[9px] px-1 py-0.2 bg-slate-100 text-slate-600 font-mono border border-slate-200">
+                                            {{ $st->code }}: {{ $sQty }}
+                                        </span>
+                                    @endforeach
+                                </div>
+                            @endif
+                        </td>
                         <td class="py-3.5 px-4 font-bold text-slate-700">{{ number_format($prod->price, 2) }}</td>
                         <td class="py-3.5 px-4">
                             @if($prod->discount > 0)
@@ -146,15 +173,15 @@
                             @endif
                         </td>
                         <td class="py-3.5 px-4 font-extrabold text-emerald-600">{{ number_format($prod->discounted_price, 2) }}</td>
-                        <td class="py-3.5 px-4 font-extrabold {{ $prod->stock <= 0 ? 'text-rose-600' : ($prod->stock <= 5 ? 'text-amber-700' : 'text-slate-900') }}">
-                            {{ $prod->stock }} units
+                        <td class="py-3.5 px-4 font-extrabold {{ $displayStock <= 0 ? 'text-rose-600' : ($displayStock <= 5 ? 'text-amber-700' : 'text-slate-900') }}">
+                            {{ $displayStock }} units
                         </td>
-                        <td class="py-3.5 px-4 font-bold text-slate-700">{{ number_format($prod->stock * $prod->price, 2) }}</td>
-                        <td class="py-3.5 px-4 font-black text-indigo-700">{{ number_format($prod->stock * $prod->discounted_price, 2) }}</td>
+                        <td class="py-3.5 px-4 font-bold text-slate-700">{{ number_format($displayStock * $prod->price, 2) }}</td>
+                        <td class="py-3.5 px-4 font-black text-indigo-700">{{ number_format($displayStock * $prod->discounted_price, 2) }}</td>
                         <td class="py-3.5 px-4 text-right">
-                            @if($prod->stock <= 0)
+                            @if($displayStock <= 0)
                                 <span class="px-2.5 py-1 bg-rose-100 text-rose-800 font-extrabold text-[10px] uppercase">Out of Stock</span>
-                            @elseif($prod->stock <= 5)
+                            @elseif($displayStock <= 5)
                                 <span class="px-2.5 py-1 bg-amber-100 text-amber-800 font-extrabold text-[10px] uppercase">Low Stock</span>
                             @else
                                 <span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 font-extrabold text-[10px] uppercase">In Stock</span>

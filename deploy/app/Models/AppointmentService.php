@@ -13,6 +13,8 @@ class AppointmentService extends Model
     protected $fillable = [
         'appointment_id',
         'saloon_service_id',
+        'custom_title',
+        'quantity',
         'price',
         'discount',
         'discounted_price',
@@ -20,11 +22,19 @@ class AppointmentService extends Model
     ];
 
     protected $casts = [
+        'quantity' => 'integer',
         'price' => 'decimal:2',
         'discount' => 'decimal:2',
         'discounted_price' => 'decimal:2',
         'commission' => 'decimal:2',
     ];
+
+    protected $appends = ['display_title'];
+
+    public function getDisplayTitleAttribute(): string
+    {
+        return $this->custom_title ?: ($this->service->title ?? 'Service');
+    }
 
     public function appointment(): BelongsTo
     {

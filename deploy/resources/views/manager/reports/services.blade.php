@@ -44,6 +44,7 @@
                 <div class="text-xs font-semibold text-slate-700 mt-1 space-y-0.5">
                     <p><strong>Date Range:</strong> {{ $startDate ? \Carbon\Carbon::parse($startDate)->format('M d, Y') : 'Beginning' }} — {{ $endDate ? \Carbon\Carbon::parse($endDate)->format('M d, Y') : 'Present' }}</p>
                     <p><strong>Category Filter:</strong> {{ $serviceCategoryId ? ($serviceCategories->firstWhere('id', $serviceCategoryId)->title ?? 'Selected') : 'All Service Categories' }}</p>
+                    <p><strong>Stylist Filter:</strong> {{ $employeeId ? ($employees->firstWhere('id', $employeeId)->name ?? 'Selected') : 'All Stylists' }}</p>
                     <p class="text-[10px] text-slate-500 pt-1">Printed: {{ now()->format('M d, Y — h:i A') }} | By: {{ Auth::user()->name }}</p>
                 </div>
             </div>
@@ -89,21 +90,45 @@
         </div>
     </div>
 
+    <!-- Summary KPI Cards -->
+    <div class="grid grid-cols-2 sm:grid-cols-5 gap-4">
+        <div class="bg-white p-4 border border-slate-200 shadow-sm">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Bookings</span>
+            <span class="text-xl font-black text-indigo-600 mt-1 block">{{ number_format($totalAppointmentsCount) }}</span>
+        </div>
+        <div class="bg-white p-4 border border-slate-200 shadow-sm">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Gross Revenue</span>
+            <span class="text-xl font-black text-slate-900 mt-1 block">PKR {{ number_format($totalGrossRevenue, 2) }}</span>
+        </div>
+        <div class="bg-white p-4 border border-slate-200 shadow-sm">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Discounts</span>
+            <span class="text-xl font-black text-rose-600 mt-1 block">PKR {{ number_format($totalDiscount, 2) }}</span>
+        </div>
+        <div class="bg-white p-4 border border-slate-200 shadow-sm">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Net Revenue</span>
+            <span class="text-xl font-black text-emerald-600 mt-1 block">PKR {{ number_format($totalNetRevenue, 2) }}</span>
+        </div>
+        <div class="bg-white p-4 border border-slate-200 shadow-sm">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Staff Commissions</span>
+            <span class="text-xl font-black text-purple-700 mt-1 block">PKR {{ number_format($totalCommission, 2) }}</span>
+        </div>
+    </div>
+
     <!-- Filter Form Bar (WEB ONLY) -->
     <div class="bg-white p-5 border border-slate-200 shadow-sm print:hidden space-y-4">
         <!-- Sub-Report Type Selection Tabs -->
-        <div class="flex items-center gap-2 border-b border-slate-200 pb-3">
-            <span class="text-xs font-black text-slate-400 uppercase tracking-wider mr-2">Report Selection:</span>
+        <div class="flex items-center gap-2 border-b border-slate-200 pb-3 overflow-x-auto">
+            <span class="text-xs font-black text-slate-400 uppercase tracking-wider mr-2 whitespace-nowrap">Report Selection:</span>
             <a href="{{ request()->fullUrlWithQuery(['report_type' => 'datewise']) }}" 
-               class="px-3.5 py-1.5 font-bold text-xs transition-all {{ $reportType == 'datewise' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200' }}">
+               class="px-3.5 py-1.5 font-bold text-xs whitespace-nowrap transition-all {{ $reportType == 'datewise' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200' }}">
                 📅 Date-Wise Report
             </a>
             <a href="{{ request()->fullUrlWithQuery(['report_type' => 'categorywise']) }}" 
-               class="px-3.5 py-1.5 font-bold text-xs transition-all {{ $reportType == 'categorywise' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200' }}">
+               class="px-3.5 py-1.5 font-bold text-xs whitespace-nowrap transition-all {{ $reportType == 'categorywise' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200' }}">
                 🏷️ Category-Wise Report
             </a>
             <a href="{{ request()->fullUrlWithQuery(['report_type' => 'detailed']) }}" 
-               class="px-3.5 py-1.5 font-bold text-xs transition-all {{ $reportType == 'detailed' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200' }}">
+               class="px-3.5 py-1.5 font-bold text-xs whitespace-nowrap transition-all {{ $reportType == 'detailed' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200' }}">
                 📋 Detailed Appointments List
             </a>
         </div>
@@ -151,14 +176,14 @@
                 <button type="submit" class="flex-1 py-2.5 bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 transition-colors shadow-xs">
                     Generate Report
                 </button>
-                <a href="{{ route('manager.reports.services') }}" class="px-4 py-2.5 bg-slate-100 text-slate-600 font-bold text-xs hover:bg-slate-200 flex items-center justify-center">
+                <a href="{{ route('manager.reports.services', ['report_type' => $reportType]) }}" class="px-4 py-2.5 bg-slate-100 text-slate-600 font-bold text-xs hover:bg-slate-200 flex items-center justify-center border border-slate-200">
                     Reset
                 </a>
             </div>
         </form>
     </div>
 
-    <!-- REPORT BODY CONTENT (SINGLE SELECTED REPORT DISPLAYED & PRINTED) -->
+    <!-- REPORT BODY CONTENT -->
 
     @if($reportType == 'datewise')
         <!-- 1. DATE-WISE SERVICE BOOKINGS REPORT -->
@@ -174,6 +199,7 @@
                             <th class="py-3 px-4">Date</th>
                             <th class="py-3 px-4">Total Bookings</th>
                             <th class="py-3 px-4">Gross Bill</th>
+                            <th class="py-3 px-4">Discount</th>
                             <th class="py-3 px-4">Net Revenue</th>
                             <th class="py-3 px-4 text-right">Commission Paid</th>
                         </tr>
@@ -183,13 +209,14 @@
                         <tr>
                             <td class="py-3 px-4 font-bold text-slate-900">{{ \Carbon\Carbon::parse($db->appointment_date)->format('M d, Y') }}</td>
                             <td class="py-3 px-4 font-bold text-indigo-600">{{ number_format($db->total_count) }}</td>
-                            <td class="py-3 px-4 text-slate-700">{{ number_format($db->gross_amount, 2) }}</td>
-                            <td class="py-3 px-4 text-emerald-600 font-bold">{{ number_format($db->net_amount, 2) }}</td>
-                            <td class="py-3 px-4 text-right text-purple-700 font-bold">{{ number_format($db->total_commission, 2) }}</td>
+                            <td class="py-3 px-4 text-slate-700">PKR {{ number_format($db->gross_amount, 2) }}</td>
+                            <td class="py-3 px-4 text-rose-600 font-semibold">PKR {{ number_format($db->discount_amount, 2) }}</td>
+                            <td class="py-3 px-4 text-emerald-600 font-black">PKR {{ number_format($db->net_amount, 2) }}</td>
+                            <td class="py-3 px-4 text-right text-purple-700 font-bold">PKR {{ number_format($db->total_commission, 2) }}</td>
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="5" class="py-8 text-center text-slate-400">No date-wise booking record found for selected filters.</td>
+                            <td colspan="6" class="py-8 text-center text-slate-400">No date-wise booking record found for selected filters.</td>
                         </tr>
                         @endforelse
                     </tbody>
@@ -219,8 +246,8 @@
                         <tr>
                             <td class="py-3 px-4 font-bold text-slate-900">{{ $cb->category_title }}</td>
                             <td class="py-3 px-4 font-bold text-indigo-600">{{ number_format($cb->service_count) }}</td>
-                            <td class="py-3 px-4 text-emerald-600 font-bold">{{ number_format($cb->total_revenue, 2) }}</td>
-                            <td class="py-3 px-4 text-right text-purple-700 font-bold">{{ number_format($cb->total_commission, 2) }}</td>
+                            <td class="py-3 px-4 text-emerald-600 font-black">PKR {{ number_format($cb->total_revenue, 2) }}</td>
+                            <td class="py-3 px-4 text-right text-purple-700 font-bold">PKR {{ number_format($cb->total_commission, 2) }}</td>
                         </tr>
                         @empty
                         <tr>
@@ -233,7 +260,7 @@
         </div>
 
     @else
-        <!-- 3. DETAILED APPOINTMENTS LIST REPORT -->
+        <!-- 3. DETAILED APPOINTMENTS LIST REPORT (WITH SERVICES, CATEGORIES & STYLISTS) -->
         <div class="bg-white border border-slate-200 shadow-sm overflow-hidden">
             <div class="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
                 <h2 class="text-xs font-extrabold text-slate-700 uppercase tracking-wider">Detailed Appointments List</h2>
@@ -248,8 +275,8 @@
                             <th class="py-3.5 px-4">Date & Time</th>
                             <th class="py-3.5 px-4">Customer Account</th>
                             <th class="py-3.5 px-4">Assigned Stylist</th>
-                            <th class="py-3.5 px-4">Treatments</th>
-                            <th class="py-3.5 px-4">Net Bill Amount</th>
+                            <th class="py-3.5 px-4">Treatments & Categories</th>
+                            <th class="py-3.5 px-4">Net Bill</th>
                             <th class="py-3.5 px-4">Commission</th>
                             <th class="py-3.5 px-4 text-right">Status</th>
                         </tr>
@@ -257,20 +284,34 @@
                     <tbody class="divide-y divide-slate-100 font-medium">
                         @forelse($appointments as $apt)
                         <tr class="hover:bg-slate-50/60 transition-colors">
-                            <td class="py-3.5 px-4 font-mono font-bold text-indigo-700">{{ $apt->booking_no }}</td>
+                            <td class="py-3.5 px-4 font-mono font-bold text-indigo-700">#{{ $apt->booking_no }}</td>
                             <td class="py-3.5 px-4 font-bold text-slate-600">
-                                {{ $apt->appointment_date->format('M d, Y') }}
+                                {{ $apt->appointment_date ? $apt->appointment_date->format('M d, Y') : '—' }}
                                 <span class="block text-[10px] text-slate-400 font-normal">{{ $apt->start_time }}</span>
                             </td>
                             <td class="py-3.5 px-4 font-bold text-slate-900">{{ $apt->customer->name ?? 'Walk-in Customer' }}</td>
-                            <td class="py-3.5 px-4 font-bold text-purple-900">{{ $apt->employee->name ?? 'Unassigned' }}</td>
-                            <td class="py-3.5 px-4">
-                                <span class="px-2 py-0.5 bg-indigo-50 text-indigo-700 font-bold text-[10px]">
-                                    {{ $apt->items->count() }} Treatment(s)
+                            <td class="py-3.5 px-4 font-bold text-purple-900">
+                                <span class="px-2 py-0.5 bg-purple-50 text-purple-800 border border-purple-200 inline-flex items-center gap-1">
+                                    👤 {{ $apt->employee->name ?? 'Unassigned' }}
                                 </span>
                             </td>
-                            <td class="py-3.5 px-4 font-black text-slate-900">{{ number_format($apt->net_amount, 2) }}</td>
-                            <td class="py-3.5 px-4 font-bold text-purple-700">{{ number_format($apt->total_commission, 2) }}</td>
+                            <td class="py-3.5 px-4">
+                                <div class="space-y-1 max-w-xs">
+                                    @foreach($apt->items as $item)
+                                        <div class="text-[11px] leading-tight">
+                                            <span class="font-bold text-slate-900">• {{ $item->service->title ?? 'Service' }}</span>
+                                            @if($item->service && $item->service->category)
+                                                <span class="text-[10px] text-indigo-700 font-semibold bg-indigo-50 px-1.5 py-0.2 border border-indigo-100 ml-1">
+                                                    {{ $item->service->category->title }}
+                                                </span>
+                                            @endif
+                                            <span class="text-[10px] text-slate-400 ml-1">PKR {{ number_format($item->discounted_price, 2) }}</span>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            </td>
+                            <td class="py-3.5 px-4 font-black text-slate-900">PKR {{ number_format($apt->net_amount, 2) }}</td>
+                            <td class="py-3.5 px-4 font-bold text-purple-700">PKR {{ number_format($apt->total_commission, 2) }}</td>
                             <td class="py-3.5 px-4 text-right uppercase font-bold text-[10px]">
                                 @if($apt->status == 'completed')
                                     <span class="px-2 py-0.5 bg-emerald-100 text-emerald-800">Completed</span>

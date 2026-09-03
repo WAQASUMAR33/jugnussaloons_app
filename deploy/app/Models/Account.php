@@ -22,8 +22,14 @@ class Account extends Model
         'card_no',
         'card_type',
         'emp_type',
+        'username',
+        'password',
         'salary',
         'balance',
+    ];
+
+    protected $hidden = [
+        'password',
     ];
 
     protected $casts = [
@@ -39,5 +45,30 @@ class Account extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(AccountCategory::class, 'account_category_id');
+    }
+
+    /**
+     * Appointments assigned to this employee.
+     */
+    public function appointmentsAsEmployee()
+    {
+        return $this->hasMany(Appointment::class, 'employee_id');
+    }
+
+    /**
+     * Get average employee ranking score (1.0 - 5.0).
+     */
+    public function getAverageRankingAttribute(): float
+    {
+        $avg = $this->appointmentsAsEmployee()->whereNotNull('ranking')->avg('ranking');
+        return $avg ? round((float)$avg, 1) : 0.0;
+    }
+
+    /**
+     * Get total number of ranked appointments.
+     */
+    public function getRankingsCountAttribute(): int
+    {
+        return (int) $this->appointmentsAsEmployee()->whereNotNull('ranking')->count();
     }
 }

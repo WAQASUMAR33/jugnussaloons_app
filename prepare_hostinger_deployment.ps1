@@ -29,11 +29,19 @@ if (Test-Path $deployDir) {
 }
 New-Item -ItemType Directory -Path $deployDir -Force | Out-Null
 
+Write-Host "=== 2b. Cleaning Cache Files Before Packaging ===" -ForegroundColor Cyan
+Get-ChildItem -Path "bootstrap\cache" -Filter "*.php" | Where-Object { $_.Name -ne ".gitignore" } | Remove-Item -Force -ErrorAction SilentlyContinue
+Get-ChildItem -Path "storage\framework\cache\data" -Recurse -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+Get-ChildItem -Path "storage\framework\views" -Filter "*.php" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+
 $filesToCopy = Get-ChildItem -Path . -Exclude "node_modules", ".git", ".env", ".phpunit.cache", "hostinger_deploy.zip", "saloon.zip", "prepare_hostinger_deployment.ps1", "deploy"
 
 foreach ($item in $filesToCopy) {
     Copy-Item -Path $item.FullName -Destination $deployDir -Recurse -Force
 }
+
+# Ensure bootstrap/cache in deploy directory is clean
+Get-ChildItem -Path "$deployDir\bootstrap\cache" -Filter "*.php" | Where-Object { $_.Name -ne ".gitignore" } | Remove-Item -Force -ErrorAction SilentlyContinue
 
 # Remove existing zip files
 if (Test-Path $saloonZip) { Remove-Item $saloonZip -Force -ErrorAction SilentlyContinue }

@@ -206,4 +206,21 @@ class AccountController extends Controller
         return redirect()->route('manager.accounts.index')
             ->with('success', "{$label} recorded successfully! Ledger entry generated & account balance updated.");
     }
+
+    /**
+     * Reset password for an account.
+     */
+    public function resetPassword(Request $request, Account $account)
+    {
+        $validated = $request->validate([
+            'password' => ['required', 'string', 'min:6', 'confirmed'],
+        ]);
+
+        $account->update([
+            'password' => Hash::make($validated['password']),
+        ]);
+
+        return redirect()->route('manager.accounts.index')
+            ->with('success', "Password for \"{$account->name}\" reset successfully!");
+    }
 }

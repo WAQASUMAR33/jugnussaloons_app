@@ -44,6 +44,7 @@
                 <option value="payment" {{ $type == 'payment' ? 'selected' : '' }}>Payment</option>
                 <option value="sale" {{ $type == 'sale' ? 'selected' : '' }}>Product Sale</option>
                 <option value="receiving" {{ $type == 'receiving' ? 'selected' : '' }}>Payment Receiving</option>
+                <option value="commission" {{ $type == 'commission' ? 'selected' : '' }}>Stylist Commission</option>
             </select>
 
             <button type="submit" class="px-5 py-2.5 bg-slate-900 text-white font-bold text-xs hover:bg-slate-800 transition-colors">
@@ -94,6 +95,10 @@
                                 <span class="px-2.5 py-1 bg-indigo-100 text-indigo-800 text-[11px] font-bold">Sale</span>
                             @elseif($ledger->type == 'receiving')
                                 <span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-[11px] font-bold">Receiving</span>
+                            @elseif($ledger->type == 'commission')
+                                <span class="px-2.5 py-1 bg-blue-100 text-blue-800 text-[11px] font-bold">Commission</span>
+                            @else
+                                <span class="px-2.5 py-1 bg-slate-100 text-slate-800 text-[11px] font-bold">{{ ucfirst($ledger->type) }}</span>
                             @endif
                         </td>
                         <td class="py-4 px-6 font-mono text-xs font-bold text-slate-700">

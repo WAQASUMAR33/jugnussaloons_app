@@ -20,10 +20,23 @@ class CheckRole
             return redirect()->route('login');
         }
 
-        if (! $request->user()->hasAnyRole($roles)) {
-            abort(403, 'Unauthorized access: You do not have permission to view this page.');
+        $user = $request->user();
+
+        // 1. Admin always passes
+        if ($user->hasRole('admin')) {
+            return $next($request);
         }
 
-        return $next($request);
+        // 2. Direct role matching
+        if ($user->hasAnyRole($roles)) {
+            return $next($request);
+        }
+
+        // 3. If checking for manager/admin and user has direct permissions, allow entry
+        if ((in_array('manager', $roles) || in_array('admin', $roles)) && ($user->permissions()->exists() || $user->roles()->exists())) {
+            return $next($request);
+        }
+
+        abort(403, 'Unauthorized access: You do not have permission to view this page.');
     }
 }

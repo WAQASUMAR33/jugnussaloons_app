@@ -13,14 +13,14 @@ use Illuminate\Validation\Rules;
 class UserController extends Controller
 {
     /**
-     * Display a listing of users and roles/permissions.
+     * Display a listing of users and direct page permissions.
      */
     public function index(Request $request)
     {
         $search = $request->input('search');
         $roleFilter = $request->input('role');
 
-        $usersQuery = User::with('roles.permissions');
+        $usersQuery = User::with(['roles', 'permissions']);
 
         if ($search) {
             $usersQuery->where(function ($q) use ($search) {
@@ -43,7 +43,7 @@ class UserController extends Controller
     }
 
     /**
-     * Store a newly created user in storage.
+     * Store a newly created user with direct page permissions.
      */
     public function store(Request $request)
     {
@@ -51,8 +51,10 @@ class UserController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:'.User::class],
             'password' => ['required', 'string', Rules\Password::defaults()],
-            'roles' => ['required', 'array'],
+            'roles' => ['nullable', 'array'],
             'roles.*' => ['exists:roles,id'],
+            'permissions' => ['nullable', 'array'],
+            'permissions.*' => ['exists:permissions,id'],
         ]);
 
         $user = User::create([
@@ -61,14 +63,27 @@ class UserController extends Controller
             'password' => Hash::make($validated['password']),
         ]);
 
-        $user->roles()->sync($validated['roles']);
+        // Sync direct user permissions
+        if (isset($validated['permissions'])) {
+            $user->permissions()->sync($validated['permissions']);
+        }
 
-        return redirect()->route('admin.users.index')
-            ->with('success', 'User successfully created with assigned roles!');
+        // Sync roles if provided, or default to customer role
+        if (!empty($validated['roles'])) {
+            $user->roles()->sync($validated['roles']);
+        } else {
+            $defaultRole = Role::where('slug', 'customer')->first();
+            if ($defaultRole) {
+                $user->roles()->sync([$defaultRole->id]);
+            }
+        }
+
+        return redirect()->route('admin.users.index', ['tab' => 'users'])
+            ->with('success', "User '{$user->name}' successfully created with assigned page permissions!");
     }
 
     /**
-     * Update the specified user in storage.
+     * Update the specified user and their direct page permissions.
      */
     public function update(Request $request, User $user)
     {
@@ -76,8 +91,10 @@ class UserController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:users,email,'.$user->id],
             'password' => ['nullable', 'string', Rules\Password::defaults()],
-            'roles' => ['required', 'array'],
+            'roles' => ['nullable', 'array'],
             'roles.*' => ['exists:roles,id'],
+            'permissions' => ['nullable', 'array'],
+            'permissions.*' => ['exists:permissions,id'],
         ]);
 
         $userData = [
@@ -90,10 +107,17 @@ class UserController extends Controller
         }
 
         $user->update($userData);
-        $user->roles()->sync($validated['roles']);
 
-        return redirect()->route('admin.users.index')
-            ->with('success', 'User successfully updated!');
+        // Sync direct user page permissions
+        $user->permissions()->sync($validated['permissions'] ?? []);
+
+        // Sync roles if provided
+        if (isset($validated['roles'])) {
+            $user->roles()->sync($validated['roles']);
+        }
+
+        return redirect()->route('admin.users.index', ['tab' => 'users'])
+            ->with('success', "User '{$user->name}' permissions and account details updated successfully!");
     }
 
     /**
@@ -106,10 +130,11 @@ class UserController extends Controller
                 ->with('error', 'You cannot delete your own active account!');
         }
 
+        $user->permissions()->detach();
         $user->roles()->detach();
         $user->delete();
 
         return redirect()->route('admin.users.index')
-            ->with('success', 'User deleted successfully!');
+            ->with('success', 'User account deleted successfully!');
     }
 }

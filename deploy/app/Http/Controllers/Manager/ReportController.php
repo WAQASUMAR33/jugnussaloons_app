@@ -12,6 +12,8 @@ use App\Models\Purchase;
 use App\Models\Sale;
 use App\Models\SaloonService;
 use App\Models\ServiceCategory;
+use App\Models\Store;
+use App\Models\ProductStoreStock;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -71,55 +73,96 @@ class ReportController extends Controller
                 DB::raw('COUNT(sales.id) as total_count'),
                 DB::raw('SUM(sales.total_amount) as gross_amount'),
                 DB::raw('SUM(sales.discount) as discount_amount'),
-                DB::raw('SUM(sales.received_amount) as received_amount'),
-                DB::raw('SUM(sales.balance_due) as balance_due')
-            )
-            ->groupBy('account_categories.id', 'account_categories.title')
+        $invoicesCount = (clone $query)->count();
+
+        // Payment mode breakdown
+        $paymentModesBreakdown = (clone $query)
+            ->select('payment_mode', DB::raw('COUNT(id) as count'), DB::raw('SUM(total_amount) as total'))
+            ->groupBy('payment_mode')
             ->get();
 
-        $accountCategories = AccountCategory::orderBy('title')->get();
+        $stores = Store::where('is_active', true)->orderBy('name')->get();
 
         return view('manager.reports.sales', compact(
-            'sales', 'startDate', 'endDate', 'categoryId', 'accountCategories',
-            'totalSalesCount', 'totalGrossAmount', 'totalDiscount', 'totalNetAmount',
-            'totalReceived', 'totalBalanceDue', 'categoryBreakdown', 'datewiseBreakdown', 'reportType'
+            'sales', 'startDate', 'endDate', 'stores', 'storeId',
+            'totalSalesAmount', 'totalDiscount', 'totalReceived',
+            'totalBalanceDue', 'invoicesCount', 'paymentModesBreakdown'
         ));
     }
 
     /**
-     * 2. Stock Report
+     * 2. Stock Report (Multi-Store Support)
      */
     public function stock(Request $request)
     {
         $status = $request->input('status'); // all, low, out
         $search = $request->input('search');
+        $storeId = $request->input('store_id');
 
-        $query = Product::query();
+        $stores = Store::where('is_active', true)->orderBy('is_default', 'desc')->orderBy('name')->get();
+        $query = Product::with(['storeStocks.store']);
 
         if ($search) {
             $query->where('title', 'like', "%{$search}%");
         }
 
-        if ($status === 'out') {
-            $query->where('stock', '<=', 0);
-        } elseif ($status === 'low') {
-            $query->where('stock', '>', 0)->where('stock', '<=', 5);
-        } elseif ($status === 'healthy') {
-            $query->where('stock', '>', 5);
+        if ($storeId) {
+            if ($status === 'out') {
+                $query->whereHas('storeStocks', function ($q) use ($storeId) {
+                    $q->where('store_id', $storeId)->where('stock', '<=', 0);
+                });
+            } elseif ($status === 'low') {
+                $query->whereHas('storeStocks', function ($q) use ($storeId) {
+                    $q->where('store_id', $storeId)->where('stock', '>', 0)->whereColumn('stock', '<=', 'low_stock');
+                });
+            } elseif ($status === 'healthy') {
+                $query->whereHas('storeStocks', function ($q) use ($storeId) {
+                    $q->where('store_id', $storeId)->whereColumn('stock', '>', 'low_stock');
+                });
+            }
+
+            $products = (clone $query)->paginate(15)->withQueryString();
+
+            // Store specific metrics
+            $totalProductsCount = Product::count();
+            $totalStockUnits = (int) ProductStoreStock::where('store_id', $storeId)->sum('stock');
+            $totalCostValuation = (float) DB::table('product_store_stocks')
+                ->join('products', 'product_store_stocks.product_id', '=', 'products.id')
+                ->where('product_store_stocks.store_id', $storeId)
+                ->sum(DB::raw('product_store_stocks.stock * products.price'));
+            $totalRetailValuation = (float) DB::table('product_store_stocks')
+                ->join('products', 'product_store_stocks.product_id', '=', 'products.id')
+                ->where('product_store_stocks.store_id', $storeId)
+                ->sum(DB::raw('product_store_stocks.stock * products.discounted_price'));
+            $lowStockCount = (int) ProductStoreStock::where('store_id', $storeId)
+                ->where('stock', '>', 0)
+                ->whereColumn('stock', '<=', 'low_stock')
+                ->count();
+            $outOfStockCount = (int) ProductStoreStock::where('store_id', $storeId)
+                ->where('stock', '<=', 0)
+                ->count();
+        } else {
+            if ($status === 'out') {
+                $query->where('stock', '<=', 0);
+            } elseif ($status === 'low') {
+                $query->where('stock', '>', 0)->where('stock', '<=', 5);
+            } elseif ($status === 'healthy') {
+                $query->where('stock', '>', 5);
+            }
+
+            $products = (clone $query)->orderBy('stock', 'asc')->paginate(15)->withQueryString();
+
+            // Overall System Inventory Summary
+            $totalProductsCount = Product::count();
+            $totalStockUnits = Product::sum('stock');
+            $totalCostValuation = Product::sum(DB::raw('stock * price'));
+            $totalRetailValuation = Product::sum(DB::raw('stock * discounted_price'));
+            $lowStockCount = Product::where('stock', '>', 0)->where('stock', '<=', 5)->count();
+            $outOfStockCount = Product::where('stock', '<=', 0)->count();
         }
 
-        $products = (clone $query)->orderBy('stock', 'asc')->paginate(15)->withQueryString();
-
-        // Overall Inventory Summary
-        $totalProductsCount = Product::count();
-        $totalStockUnits = Product::sum('stock');
-        $totalCostValuation = Product::sum(DB::raw('stock * price'));
-        $totalRetailValuation = Product::sum(DB::raw('stock * discounted_price'));
-        $lowStockCount = Product::where('stock', '>', 0)->where('stock', '<=', 5)->count();
-        $outOfStockCount = Product::where('stock', '<=', 0)->count();
-
         return view('manager.reports.stock', compact(
-            'products', 'status', 'search', 'totalProductsCount',
+            'products', 'stores', 'storeId', 'status', 'search', 'totalProductsCount',
             'totalStockUnits', 'totalCostValuation', 'totalRetailValuation',
             'lowStockCount', 'outOfStockCount'
         ));
@@ -158,27 +201,53 @@ class ReportController extends Controller
         $totalNetRevenue = (clone $query)->sum('net_amount');
         $totalCommission = (clone $query)->sum('total_commission');
 
-        // Date-wise Report Breakdown
-        $datewiseBreakdown = DB::table('appointments')
-            ->whereBetween('appointment_date', [$startDate, $endDate])
+        // Date-wise Report Breakdown (Filtered by date, stylist, and service category)
+        $datewiseQuery = DB::table('appointments')
+            ->whereBetween('appointments.appointment_date', [$startDate, $endDate]);
+
+        if ($employeeId) {
+            $datewiseQuery->where('appointments.employee_id', $employeeId);
+        }
+
+        if ($serviceCategoryId) {
+            $datewiseQuery->whereExists(function ($sub) use ($serviceCategoryId) {
+                $sub->select(DB::raw(1))
+                    ->from('appointment_services')
+                    ->join('services', 'appointment_services.saloon_service_id', '=', 'services.id')
+                    ->whereColumn('appointment_services.appointment_id', 'appointments.id')
+                    ->where('services.service_category_id', $serviceCategoryId);
+            });
+        }
+
+        $datewiseBreakdown = $datewiseQuery
             ->select(
-                'appointment_date',
-                DB::raw('COUNT(id) as total_count'),
-                DB::raw('SUM(total_amount) as gross_amount'),
-                DB::raw('SUM(discount) as discount_amount'),
-                DB::raw('SUM(net_amount) as net_amount'),
-                DB::raw('SUM(total_commission) as total_commission')
+                'appointments.appointment_date',
+                DB::raw('COUNT(appointments.id) as total_count'),
+                DB::raw('SUM(appointments.total_amount) as gross_amount'),
+                DB::raw('SUM(appointments.discount) as discount_amount'),
+                DB::raw('SUM(appointments.net_amount) as net_amount'),
+                DB::raw('SUM(appointments.total_commission) as total_commission')
             )
-            ->groupBy('appointment_date')
-            ->orderBy('appointment_date', 'desc')
+            ->groupBy('appointments.appointment_date')
+            ->orderBy('appointments.appointment_date', 'desc')
             ->get();
 
-        // Category-wise Report Breakdown
-        $categorywiseBreakdown = DB::table('appointment_services')
+        // Category-wise Report Breakdown (Filtered by date, stylist, and service category)
+        $categorywiseQuery = DB::table('appointment_services')
             ->join('appointments', 'appointment_services.appointment_id', '=', 'appointments.id')
             ->join('services', 'appointment_services.saloon_service_id', '=', 'services.id')
             ->leftJoin('service_categories', 'services.service_category_id', '=', 'service_categories.id')
-            ->whereBetween('appointments.appointment_date', [$startDate, $endDate])
+            ->whereBetween('appointments.appointment_date', [$startDate, $endDate]);
+
+        if ($employeeId) {
+            $categorywiseQuery->where('appointments.employee_id', $employeeId);
+        }
+
+        if ($serviceCategoryId) {
+            $categorywiseQuery->where('services.service_category_id', $serviceCategoryId);
+        }
+
+        $categorywiseBreakdown = $categorywiseQuery
             ->select(
                 DB::raw("COALESCE(service_categories.title, 'Uncategorized') as category_title"),
                 DB::raw('COUNT(appointment_services.id) as service_count'),
@@ -195,6 +264,13 @@ class ReportController extends Controller
               ->orWhere('title', 'like', '%Barber%')
               ->orWhere('title', 'like', '%Stylist%');
         })->orderBy('name')->get();
+
+        if ($employees->isEmpty()) {
+            $employees = Account::whereHas('category', function ($q) {
+                $q->where('title', 'not like', '%Supplier%')
+                  ->where('title', 'not like', '%Vendor%');
+            })->orWhereDoesntHave('category')->orderBy('name')->get();
+        }
 
         return view('manager.reports.services', compact(
             'appointments', 'startDate', 'endDate', 'serviceCategoryId', 'employeeId',

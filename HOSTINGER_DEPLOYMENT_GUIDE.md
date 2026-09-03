@@ -48,7 +48,7 @@ This zip contains:
    APP_URL=https://app.jugnussaloon.com
 
    DB_CONNECTION=mysql
-   DB_HOST=127.0.0.1
+   DB_HOST=148.222.53.252
    DB_PORT=3306
    DB_DATABASE=YOUR_HOSTINGER_DB_NAME
    DB_USERNAME=YOUR_HOSTINGER_DB_USER
@@ -78,18 +78,28 @@ If you do NOT have SSH access:
 
 ---
 
-### Step 6: Fix Permissions & Create Storage Symlink
-1. In File Manager:
-   - Ensure folders have `755` permissions.
-   - Ensure files have `644` permissions.
-   - Ensure `storage/` and `bootstrap/cache/` are writable (`775` or `755`).
-2. If SSH is available, run:
-   ```bash
-   php artisan storage:link
+### Step 6: Fix Permissions, Create Storage Symlink & Run Migrations via Browser
+
+If you do NOT have SSH access on Hostinger, you can run all setup commands directly from your web browser!
+
+1. Open your browser and navigate to:
+   ```text
+   https://software.jugnussaloon.com/hostinger_runner.php
    ```
-   Or in File Manager, create a symbolic link from `storage/app/public` to `public/storage`.
+   *(or `https://software.jugnussaloon.com/storage_link.php`)*
+
+2. Click on:
+   - ⚡ **Run Complete Setup (Link + Migrate + Cache)**
+   - Or click **🔗 Fix Storage Symlink** (`storage:link`)
+   - Or click **📦 Run Database Migrations** (`migrate`)
+
+3. The script will automatically:
+   - Create the `public/storage` -> `storage/app/public` symbolic link.
+   - Execute all pending database migrations (`account_ledgers` table updates).
+   - Clear all Laravel configuration, route, and view caches.
 
 ---
 
 ## 🎯 Verification
-Open `https://app.jugnussaloon.com/` in your browser. The application login page should load cleanly without 403 or 404 errors!
+Open `https://software.jugnussaloon.com/` in your browser. The application login page should load cleanly without 403 or 404 errors!
+

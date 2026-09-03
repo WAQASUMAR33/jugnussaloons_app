@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\Appointment;
 use App\Models\AppointmentService;
+use App\Models\BankAccount;
 use App\Models\ContactMessage;
 use App\Models\Gallery;
 use App\Models\Product;
@@ -94,11 +95,31 @@ class PublicApiController extends Controller
     }
 
     /**
-     * Fetch service categories for filtering.
+     * Fetch service categories for filtering and front-end display.
      */
-    public function serviceCategories()
+    public function serviceCategories(Request $request)
     {
-        $categories = ServiceCategory::orderBy('title')->get();
+        $search = $request->query('search');
+
+        $query = ServiceCategory::withCount('services');
+
+        if ($search) {
+            $query->where('title', 'like', "%{$search}%")
+                  ->orWhere('description', 'like', "%{$search}%");
+        }
+
+        $categories = $query->orderBy('title', 'asc')->get()->map(function ($cat) {
+            return [
+                'id' => $cat->id,
+                'title' => $cat->title,
+                'description' => $cat->description,
+                'image' => $cat->image,
+                'image_url' => $cat->image ? url($cat->image) : null,
+                'services_count' => (int) $cat->services_count,
+                'created_at' => $cat->created_at,
+                'updated_at' => $cat->updated_at,
+            ];
+        });
 
         return response()->json([
             'success' => true,
@@ -162,8 +183,12 @@ class PublicApiController extends Controller
             'customer_email' => ['nullable', 'email', 'max:255'],
             'appointment_date' => ['required', 'date', 'after_or_equal:today'],
             'start_time' => ['required', 'string'],
+            'order_type' => ['nullable', 'string', 'in:On Site,Online,on_site,online,onsite'],
             'service_ids' => ['required', 'array', 'min:1'],
             'service_ids.*' => ['required', 'exists:services,id'],
+            'service_quantities' => ['nullable', 'array'],
+            'service_quantities.*' => ['nullable', 'numeric', 'min:1'],
+            'quantities' => ['nullable', 'array'],
             'notes' => ['nullable', 'string', 'max:1000'],
             'receipt_image' => ['nullable', 'file', 'image', 'max:5120'],
         ]);
@@ -177,6 +202,13 @@ class PublicApiController extends Controller
         }
 
         $validated = $validator->validated();
+
+        // Determine appointment / order type (default: Online)
+        $orderType = 'Online';
+        if (!empty($validated['order_type'])) {
+            $normalized = strtolower(str_replace([' ', '_', '-'], '', $validated['order_type']));
+            $orderType = ($normalized === 'onsite') ? 'On Site' : 'Online';
+        }
 
         // Check if requested time slot is already reserved for the date
         if (!empty($validated['start_time']) && !empty($validated['appointment_date'])) {
@@ -204,9 +236,10 @@ class PublicApiController extends Controller
             $receiptPath = 'uploads/receipts/' . $filename;
         }
 
-        $appointment = DB::transaction(function () use ($validated, $receiptPath) {
+        $appointment = DB::transaction(function () use ($validated, $receiptPath, $orderType, $request) {
             $customerCategory = \App\Models\AccountCategory::where('title', 'like', '%Customer%')->first() 
-                ?? \App\Models\AccountCategory::first();
+                ?? \App\Models\AccountCategory::where('title', 'like', '%Client%')->first()
+                ?? \App\Models\AccountCategory::firstOrCreate(['title' => 'Regular Customer']);
 
             $customer = Account::where('phone_no1', $validated['customer_phone'])->first();
 
@@ -214,38 +247,77 @@ class PublicApiController extends Controller
                 $customer = Account::create([
                     'name' => $validated['customer_name'],
                     'phone_no1' => $validated['customer_phone'],
-                    'account_category_id' => $customerCategory ? $customerCategory->id : 1,
+                    'account_category_id' => $customerCategory->id,
                     'balance' => 0,
                 ]);
             }
 
-            // Fetch default employee / staff account if exists
-            $employee = Account::whereHas('category', function ($q) {
-                $q->where('title', 'like', '%Employee%')
-                  ->orWhere('title', 'like', '%Staff%');
+            // Fetch default employee / staff account if exists, or auto-create fallback staff
+            $employee = Account::where(function ($q) {
+                $q->whereHas('category', function ($cq) {
+                    $cq->where('title', 'like', '%Employee%')
+                       ->orWhere('title', 'like', '%Staff%');
+                })->orWhere(function ($sq) {
+                    $sq->whereNotNull('emp_type')->where('emp_type', '!=', '');
+                });
             })->first();
 
-            $employeeId = $employee ? $employee->id : $customer->id;
+            if (!$employee) {
+                $staffCategory = \App\Models\AccountCategory::firstOrCreate(['title' => 'Staff / Employee']);
+                $employee = Account::firstOrCreate(
+                    ['name' => 'General Staff'],
+                    [
+                        'account_category_id' => $staffCategory->id,
+                        'phone_no1' => '0300-1111111',
+                        'balance' => 0,
+                        'emp_type' => 'junior',
+                    ]
+                );
+            }
 
-            $services = SaloonService::whereIn('id', $validated['service_ids'])->get();
+            $employeeId = $employee->id;
+
+            $serviceIds = $validated['service_ids'];
+            $serviceQuantities = $request->input('service_quantities', $request->input('quantities', []));
+            $services = SaloonService::whereIn('id', $serviceIds)->get()->keyBy('id');
             $isSenior = $employee && strtolower($employee->emp_type ?? '') === 'senior';
             $grossTotal = 0;
             $totalCommission = 0;
-            $serviceCommissions = [];
+            $processedItems = [];
 
-            foreach ($services as $srv) {
-                $grossTotal += (float) ($srv->discounted_price ?? $srv->calculateDiscountedPrice());
-                $comm = $isSenior
+            foreach ($serviceIds as $index => $sId) {
+                if (!isset($services[$sId])) continue;
+                $srv = $services[$sId];
+                $qty = (isset($serviceQuantities[$index]) && is_numeric($serviceQuantities[$index]) && (int)$serviceQuantities[$index] > 0)
+                    ? (int)$serviceQuantities[$index]
+                    : 1;
+
+                $unitPrice = (float) ($srv->discounted_price ?? $srv->calculateDiscountedPrice());
+                $lineTotal = round($unitPrice * $qty, 2);
+
+                $singleComm = $isSenior
                     ? (float) ($srv->senior_commission ?? $srv->commission ?? 0)
                     : (float) ($srv->junior_commission ?? $srv->commission ?? 0);
-                $serviceCommissions[$srv->id] = $comm;
-                $totalCommission += $comm;
+                $lineComm = round($singleComm * $qty, 2);
+
+                $grossTotal += $lineTotal;
+                $totalCommission += $lineComm;
+
+                $processedItems[] = [
+                    'saloon_service_id' => $srv->id,
+                    'quantity' => $qty,
+                    'price' => $srv->price,
+                    'discount' => $srv->discount,
+                    'discounted_price' => $lineTotal,
+                    'commission' => $lineComm,
+                ];
             }
 
             $bookingNo = 'APT-' . date('Ym') . '-' . str_pad(Appointment::count() + 1, 4, '0', STR_PAD_LEFT);
 
             $appointment = Appointment::create([
                 'booking_no' => $bookingNo,
+                'order_type' => $orderType,
                 'account_id' => $customer->id,
                 'employee_id' => $employeeId,
                 'appointment_date' => $validated['appointment_date'],
@@ -257,19 +329,14 @@ class PublicApiController extends Controller
                 'balance_due' => $grossTotal,
                 'total_commission' => $totalCommission,
                 'status' => 'pending',
-                'notes' => ($validated['notes'] ?? '') . " [Front-end online booking: {$validated['customer_name']} - Phone: {$validated['customer_phone']}]",
+                'notes' => ($validated['notes'] ?? '') . " [Front-end {$orderType} booking: {$validated['customer_name']} - Phone: {$validated['customer_phone']}]",
                 'receipt_image' => $receiptPath ? url($receiptPath) : null,
             ]);
 
-            foreach ($services as $srv) {
-                AppointmentService::create([
+            foreach ($processedItems as $item) {
+                AppointmentService::create(array_merge($item, [
                     'appointment_id' => $appointment->id,
-                    'saloon_service_id' => $srv->id,
-                    'price' => $srv->price,
-                    'discount' => $srv->discount,
-                    'discounted_price' => $srv->discounted_price ?? $srv->calculateDiscountedPrice(),
-                    'commission' => $serviceCommissions[$srv->id] ?? 0,
-                ]);
+                ]));
             }
 
             return $appointment;
@@ -284,6 +351,7 @@ class PublicApiController extends Controller
             'message' => 'Appointment created successfully',
             'data' => [
                 'booking_no' => $appointment->booking_no,
+                'order_type' => $appointment->order_type,
                 'customer_name' => $validated['customer_name'],
                 'customer_phone' => $validated['customer_phone'],
                 'appointment_date' => $formattedDate,
@@ -379,7 +447,7 @@ class PublicApiController extends Controller
             $customer = $existingCustomer;
         } else {
             $customer = Account::create([
-                'account_category_id' => $customerCategory ? $customerCategory->id : 1,
+                'account_category_id' => $customerCategory->id,
                 'name' => $validated['name'],
                 'phone_no1' => $validated['phone_no1'],
                 'username' => $validated['username'],
@@ -487,6 +555,48 @@ class PublicApiController extends Controller
                 'date_of_anniversary' => $anniv,
                 'balance' => (float) $customer->balance,
             ],
+        ]);
+    }
+
+    /**
+     * Fetch bank account details list for payment transfers.
+     */
+    public function bankAccounts(Request $request)
+    {
+        $search = $request->query('search');
+
+        $query = BankAccount::query();
+
+        if ($request->has('all') && $request->query('all') == 'true') {
+            // Include all active & inactive
+        } else {
+            $query->where('is_active', true);
+        }
+
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('bank_name', 'like', "%{$search}%")
+                  ->orWhere('account_title', 'like', "%{$search}%")
+                  ->orWhere('account_no', 'like', "%{$search}%");
+            });
+        }
+
+        $bankAccounts = $query->orderBy('bankid', 'desc')->get()->map(function ($acc) {
+            return [
+                'bankid' => (int) $acc->bankid,
+                'bank_name' => $acc->bank_name,
+                'account_title' => $acc->account_title,
+                'account_no' => $acc->account_no,
+                'branch_name' => $acc->branch_name,
+                'iban' => $acc->iban,
+                'is_active' => (bool) $acc->is_active,
+                'created_at' => $acc->created_at,
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => $bankAccounts,
         ]);
     }
 }

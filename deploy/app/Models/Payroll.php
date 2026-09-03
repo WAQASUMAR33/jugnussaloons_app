@@ -45,4 +45,13 @@ class Payroll extends Model
     {
         return $this->belongsTo(Account::class, 'account_id');
     }
+
+    /**
+     * Itemized payroll deductions.
+     */
+    public function deductionItems()
+    {
+        return $this->hasMany(PayrollDeduction::class, 'account_id', 'account_id')
+            ->where('month_year', $this->month_year);
+    }
 }

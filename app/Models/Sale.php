@@ -14,6 +14,7 @@ class Sale extends Model
     protected $fillable = [
         'invoice_no',
         'account_id',
+        'store_id',
         'total_amount',
         'discount',
         'received_amount',
@@ -32,6 +33,14 @@ class Sale extends Model
         'balance_due' => 'decimal:2',
         'extra_amount' => 'decimal:2',
     ];
+
+    /**
+     * Store location where sale occurred.
+     */
+    public function store(): BelongsTo
+    {
+        return $this->belongsTo(Store::class, 'store_id');
+    }
 
     /**
      * Customer account relationship.

@@ -23,8 +23,16 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         View::composer('*', function ($view) {
-            if (Schema::hasTable('settings')) {
-                $view->with('appSetting', Setting::getSettings());
+            static $cachedSetting = null;
+            if ($cachedSetting === null) {
+                try {
+                    $cachedSetting = Setting::getSettings();
+                } catch (\Throwable $e) {
+                    $cachedSetting = null;
+                }
+            }
+            if ($cachedSetting) {
+                $view->with('appSetting', $cachedSetting);
             }
         });
     }

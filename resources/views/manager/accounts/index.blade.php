@@ -6,12 +6,68 @@
 <div x-data="{ 
     createModalOpen: false,
     editModalOpen: false,
+    resetPasswordModalOpen: false,
     transactionModalOpen: false,
     transactionType: 'receiving',
     categories: {{ json_encode($categories->map(fn($c) => ['id' => (int)$c->id, 'title' => $c->title])) }},
     createCategoryId: '',
     activeAccount: { id: null, name: '', balance: 0, category: '' },
-    editAccount: { id: null, account_category_id: '', name: '', father_name: '', address: '', date_of_birth: '', date_of_anniversary: '', phone_no1: '', phone_no2: '', card_no: '', card_type: '', username: '', emp_type: 'junior', salary: 0, balance: 0 },
+    resetAccount: { id: null, name: '', username: '' },
+    editAccount: { 
+        id: null, 
+        account_category_id: '', 
+        name: '', 
+        father_name: '', 
+        address: '', 
+        date_of_birth: '', 
+        date_of_anniversary: '', 
+        phone_no1: '', 
+        phone_no2: '', 
+        card_no: '', 
+        card_type: '', 
+        username: '', 
+        emp_type: 'junior', 
+        salary: 0, 
+        balance: 0 
+    },
+    openEditModal(data) {
+        this.editAccount = {
+            id: data.id || null,
+            account_category_id: data.account_category_id || '',
+            name: data.name || '',
+            father_name: data.father_name || '',
+            address: data.address || '',
+            date_of_birth: data.date_of_birth || '',
+            date_of_anniversary: data.date_of_anniversary || '',
+            phone_no1: data.phone_no1 || '',
+            phone_no2: data.phone_no2 || '',
+            card_no: data.card_no || '',
+            card_type: data.card_type || '',
+            username: data.username || '',
+            emp_type: data.emp_type || 'junior',
+            salary: Number(data.salary || 0),
+            balance: Number(data.balance || 0)
+        };
+        this.editModalOpen = true;
+    },
+    openResetPasswordModal(data) {
+        this.resetAccount = {
+            id: data.id,
+            name: data.name,
+            username: data.username || ''
+        };
+        this.resetPasswordModalOpen = true;
+    },
+    openTransactionModal(data, type) {
+        this.activeAccount = {
+            id: data.id,
+            name: data.name,
+            balance: Number(data.balance || 0),
+            category: data.category || 'General'
+        };
+        this.transactionType = type;
+        this.transactionModalOpen = true;
+    },
     isCustomerCategory(catId) {
         if (!catId) return false;
         const cat = this.categories.find(c => c.id == catId);
@@ -179,14 +235,24 @@
                         <td class="py-4 px-6 text-right">
                             <div class="flex items-center justify-end gap-1.5">
                                 <!-- Receive Payment Action -->
-                                <button @click="activeAccount = { id: {{ $account->id }}, name: '{{ addslashes($account->name) }}', balance: {{ $account->balance }}, category: '{{ addslashes($account->category->title ?? 'General') }}' }; transactionType = 'receiving'; transactionModalOpen = true" 
+                                <button @click="openTransactionModal(@js([
+                                            'id' => $account->id, 
+                                            'name' => $account->name, 
+                                            'balance' => (float)$account->balance, 
+                                            'category' => $account->category->title ?? 'General'
+                                        ]), 'receiving')" 
                                         class="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-extrabold text-[11px] flex items-center gap-1 transition-colors" title="Receive Cash Payment">
                                     <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
                                     <span>Receive</span>
                                 </button>
 
                                 <!-- Make Payment Action -->
-                                <button @click="activeAccount = { id: {{ $account->id }}, name: '{{ addslashes($account->name) }}', balance: {{ $account->balance }}, category: '{{ addslashes($account->category->title ?? 'General') }}' }; transactionType = 'payment'; transactionModalOpen = true" 
+                                <button @click="openTransactionModal(@js([
+                                            'id' => $account->id, 
+                                            'name' => $account->name, 
+                                            'balance' => (float)$account->balance, 
+                                            'category' => $account->category->title ?? 'General'
+                                        ]), 'payment')" 
                                         class="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 font-extrabold text-[11px] flex items-center gap-1 transition-colors" title="Make Cash Payment">
                                     <svg class="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path></svg>
                                     <span>Payment</span>
@@ -198,23 +264,34 @@
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
                                 </a>
 
-                                <button @click="editAccount = { 
-                                            id: {{ $account->id }}, 
-                                            account_category_id: {{ $account->account_category_id }}, 
-                                            name: '{{ addslashes($account->name) }}', 
-                                            father_name: '{{ addslashes($account->father_name ?? '') }}', 
-                                            address: '{{ addslashes($account->address ?? '') }}', 
-                                            date_of_birth: '{{ $account->date_of_birth ? $account->date_of_birth->format('Y-m-d') : '' }}', 
-                                            date_of_anniversary: '{{ $account->date_of_anniversary ? $account->date_of_anniversary->format('Y-m-d') : '' }}', 
-                                            phone_no1: '{{ addslashes($account->phone_no1) }}', 
-                                            phone_no2: '{{ addslashes($account->phone_no2 ?? '') }}', 
-                                            card_no: '{{ addslashes($account->card_no ?? '') }}', 
-                                            card_type: '{{ addslashes($account->card_type ?? '') }}', 
-                                            username: '{{ addslashes($account->username ?? '') }}', 
-                                            emp_type: '{{ addslashes($account->emp_type ?? 'junior') }}',
-                                            salary: {{ $account->salary ?? 0 }},
-                                            balance: {{ $account->balance }} 
-                                        }; editModalOpen = true" 
+                                <!-- Reset Password Action -->
+                                <button @click="openResetPasswordModal(@js([
+                                            'id' => $account->id,
+                                            'name' => $account->name,
+                                            'username' => $account->username ?? ''
+                                        ]))" 
+                                        class="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 transition-colors" title="Reset Password">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+                                </button>
+
+                                <!-- Edit Action -->
+                                <button @click="openEditModal(@js([
+                                            'id' => $account->id, 
+                                            'account_category_id' => $account->account_category_id, 
+                                            'name' => $account->name, 
+                                            'father_name' => $account->father_name ?? '', 
+                                            'address' => $account->address ?? '', 
+                                            'date_of_birth' => $account->date_of_birth ? $account->date_of_birth->format('Y-m-d') : '', 
+                                            'date_of_anniversary' => $account->date_of_anniversary ? $account->date_of_anniversary->format('Y-m-d') : '', 
+                                            'phone_no1' => $account->phone_no1, 
+                                            'phone_no2' => $account->phone_no2 ?? '', 
+                                            'card_no' => $account->card_no ?? '', 
+                                            'card_type' => $account->card_type ?? '', 
+                                            'username' => $account->username ?? '', 
+                                            'emp_type' => $account->emp_type ?? 'junior',
+                                            'salary' => (float)($account->salary ?? 0),
+                                            'balance' => (float)($account->balance ?? 0)
+                                        ]))" 
                                         class="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors" title="Edit Account">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
                                 </button>
@@ -561,6 +638,57 @@
                     </button>
                     <button type="submit" class="px-6 py-2.5 bg-indigo-600 text-white font-bold text-xs shadow-md">
                         Update Account
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: RESET PASSWORD -->
+    <div x-show="resetPasswordModalOpen" 
+         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm"
+         x-cloak>
+        <div @click.outside="resetPasswordModalOpen = false" class="bg-white max-w-md w-full p-6 shadow-2xl space-y-6">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-4">
+                <h3 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+                    Reset Password
+                </h3>
+                <button @click="resetPasswordModalOpen = false" class="text-slate-400 hover:text-slate-600">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+
+            <!-- Target Account Box -->
+            <div class="p-3.5 bg-amber-50/70 border border-amber-200">
+                <p class="text-[10px] font-bold uppercase text-amber-700">Target Account</p>
+                <h4 class="text-sm font-extrabold text-slate-900" x-text="resetAccount.name"></h4>
+                <template x-if="resetAccount.username">
+                    <p class="text-xs font-semibold text-indigo-600">@ <span x-text="resetAccount.username"></span></p>
+                </template>
+            </div>
+
+            <form :action="'{{ url('manager/accounts') }}/' + resetAccount.id + '/reset-password'" method="POST" class="space-y-4">
+                @csrf
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 uppercase mb-1">New Password</label>
+                    <input type="password" name="password" required minlength="6" placeholder="Enter new password (min 6 characters)" 
+                           class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-amber-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Confirm New Password</label>
+                    <input type="password" name="password_confirmation" required minlength="6" placeholder="Re-type new password" 
+                           class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-amber-500">
+                </div>
+
+                <div class="pt-4 flex justify-end gap-3 border-t border-slate-100">
+                    <button type="button" @click="resetPasswordModalOpen = false" class="px-4 py-2.5 text-slate-600 font-bold text-xs">
+                        Cancel
+                    </button>
+                    <button type="submit" class="px-6 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-md transition-colors">
+                        Reset Password
                     </button>
                 </div>
             </form>

@@ -27,7 +27,7 @@ class AccountLedgerController extends Controller
             $query->where('type', $type);
         }
 
-        $ledgers = $query->orderBy('date', 'desc')->orderBy('id', 'desc')->paginate(15)->withQueryString();
+        $ledgers = $query->orderBy('id', 'desc')->paginate(15)->withQueryString();
         $accounts = Account::orderBy('name')->get();
 
         $selectedAccount = $accountId ? Account::find($accountId) : null;

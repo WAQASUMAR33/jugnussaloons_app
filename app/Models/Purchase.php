@@ -14,6 +14,7 @@ class Purchase extends Model
     protected $fillable = [
         'invoice_no',
         'account_id',
+        'store_id',
         'total_amount',
         'paid_amount',
         'balance_due',
@@ -27,6 +28,14 @@ class Purchase extends Model
         'paid_amount' => 'decimal:2',
         'balance_due' => 'decimal:2',
     ];
+
+    /**
+     * Store relationship.
+     */
+    public function store(): BelongsTo
+    {
+        return $this->belongsTo(Store::class, 'store_id');
+    }
 
     /**
      * Supplier account relationship.

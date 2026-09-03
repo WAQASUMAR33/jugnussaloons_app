@@ -35,10 +35,16 @@ class Gallery extends Model
      */
     public function getUrlAttribute(): string
     {
+        if (empty($this->image_path)) {
+            return asset('images/placeholder-gallery.svg');
+        }
+
         if (filter_var($this->image_path, FILTER_VALIDATE_URL)) {
             return $this->image_path;
         }
-        return asset($this->image_path);
+
+        $cleanPath = ltrim($this->image_path, '/');
+        return asset($cleanPath);
     }
 
     /**

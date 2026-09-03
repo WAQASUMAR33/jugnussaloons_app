@@ -3,7 +3,7 @@
   "info": {
     "title": "Jugnu Saloon Public API",
     "version": "1.0.0",
-    "description": "Public REST API specification for front-end integration (Products, Services, Categories, Appointment Booking, Contact Form)"
+    "description": "Public REST API specification for front-end integration (Products, Services, Categories, Gallery Showcase, Appointment Booking, Contact Form, Customer Signup & Login)"
   },
   "servers": [
     {
@@ -70,6 +70,34 @@
         }
       }
     },
+    "/api/galleries": {
+      "get": {
+        "summary": "Fetch Gallery Showcase",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation"
+          }
+        }
+      }
+    },
     "/api/appointments": {
       "post": {
         "summary": "Book Appointment",
@@ -79,7 +107,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["customer_name", "customer_phone", "appointment_date", "service_ids"],
+                "required": ["customer_name", "customer_phone", "appointment_date", "start_time", "service_ids"],
                 "properties": {
                   "customer_name": { "type": "string" },
                   "customer_phone": { "type": "string" },
@@ -98,7 +126,7 @@
             "description": "Appointment created"
           },
           "422": {
-            "description": "Validation error"
+            "description": "Validation error or time slot unavailable"
           }
         }
       }
@@ -127,6 +155,76 @@
         "responses": {
           "201": {
             "description": "Contact message submitted"
+          },
+          "422": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/customer/signup": {
+      "post": {
+        "summary": "Customer Account Registration",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "phone_no1", "username", "password"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "phone_no1": { "type": "string" },
+                  "username": { "type": "string" },
+                  "password": { "type": "string" },
+                  "father_name": { "type": "string" },
+                  "address": { "type": "string" },
+                  "date_of_birth": { "type": "string", "format": "date" },
+                  "date_of_anniversary": { "type": "string", "format": "date" },
+                  "card_type": { "type": "string", "enum": ["No Card", "Silver", "Gold", "Platinum"] },
+                  "card_no": { "type": "string" },
+                  "phone_no2": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Customer registered successfully"
+          },
+          "422": {
+            "description": "Validation error or username taken"
+          }
+        }
+      }
+    },
+    "/api/customer/login": {
+      "post": {
+        "summary": "Customer Login",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["password"],
+                "properties": {
+                  "username": { "type": "string" },
+                  "login": { "type": "string" },
+                  "phone_no1": { "type": "string" },
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Customer authenticated successfully"
+          },
+          "401": {
+            "description": "Invalid credentials"
           },
           "422": {
             "description": "Validation error"

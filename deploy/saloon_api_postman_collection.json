@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Jugnu Saloon Public API",
-    "description": "Postman collection for Jugnu Saloon public REST API endpoints (Products, Services, Categories, Appointment Booking, Contact Form)",
+    "description": "Postman collection for Jugnu Saloon public REST API endpoints (Products, Services, Categories, Gallery Showcase, Appointment Booking, Contact Form, Customer Signup & Login)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -23,13 +23,20 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/products",
+          "raw": "{{base_url}}/api/products?search=",
           "host": [
             "{{base_url}}"
           ],
           "path": [
             "api",
             "products"
+          ],
+          "query": [
+            {
+              "key": "search",
+              "value": "",
+              "disabled": true
+            }
           ]
         }
       }
@@ -45,13 +52,25 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/services",
+          "raw": "{{base_url}}/api/services?category_id=&search=",
           "host": [
             "{{base_url}}"
           ],
           "path": [
             "api",
             "services"
+          ],
+          "query": [
+            {
+              "key": "category_id",
+              "value": "",
+              "disabled": true
+            },
+            {
+              "key": "search",
+              "value": "",
+              "disabled": true
+            }
           ]
         }
       }
@@ -79,6 +98,40 @@
       }
     },
     {
+      "name": "Fetch Gallery Showcase",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/galleries?category=&search=",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "galleries"
+          ],
+          "query": [
+            {
+              "key": "category",
+              "value": "",
+              "disabled": true
+            },
+            {
+              "key": "search",
+              "value": "",
+              "disabled": true
+            }
+          ]
+        }
+      }
+    },
+    {
       "name": "Book Appointment",
       "request": {
         "method": "POST",
@@ -94,7 +147,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"customer_name\": \"Michael Scott\",\n  \"customer_phone\": \"03001112233\",\n  \"customer_email\": \"michael@example.com\",\n  \"appointment_date\": \"2026-08-20\",\n  \"start_time\": \"14:00\",\n  \"service_ids\": [1, 2],\n  \"notes\": \"Prefers senior stylist.\"\n}"
+          "raw": "{\n  \"customer_name\": \"Ayesha Khan\",\n  \"customer_phone\": \"03194415757\",\n  \"customer_email\": \"ayesha@example.com\",\n  \"appointment_date\": \"2026-08-20\",\n  \"start_time\": \"14:00\",\n  \"service_ids\": [1, 2],\n  \"notes\": \"Requested senior stylist.\"\n}"
         },
         "url": {
           "raw": "{{base_url}}/api/appointments",
@@ -134,6 +187,68 @@
           "path": [
             "api",
             "contact"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Customer Account Signup",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Sarah Johnson\",\n  \"phone_no1\": \"03123456789\",\n  \"username\": \"sarah_j\",\n  \"password\": \"password123\",\n  \"father_name\": \"Robert Johnson\",\n  \"address\": \"123 Beauty Ave, Lahore\",\n  \"card_type\": \"Gold\",\n  \"date_of_birth\": \"1998-06-20\",\n  \"date_of_anniversary\": \"2022-10-15\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/customer/signup",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "customer",
+            "signup"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Customer Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"sarah_j\",\n  \"password\": \"password123\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/customer/login",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "customer",
+            "login"
           ]
         }
       }

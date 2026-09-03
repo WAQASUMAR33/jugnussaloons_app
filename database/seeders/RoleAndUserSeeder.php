@@ -52,19 +52,22 @@ class RoleAndUserSeeder extends Seeder
         $managePayroll = Permission::firstOrCreate(['slug' => 'manage-payroll'], ['name' => 'Manage Employee Payroll']);
         $manageSettings = Permission::firstOrCreate(['slug' => 'manage-settings'], ['name' => 'Manage Brand & System Settings']);
         $manageGallery = Permission::firstOrCreate(['slug' => 'manage-gallery'], ['name' => 'Manage Photo Gallery Showcase']);
+        $allowBillDiscount = Permission::firstOrCreate(['slug' => 'allow-bill-discount'], ['name' => 'Allow Bill Discount']);
 
         // Assign Permissions to Roles
         $adminRole->permissions()->sync([
             $manageUsers->id, $manageRoles->id, $viewReports->id, 
             $manageServices->id, $manageAppointments->id, $bookAppointment->id,
             $manageAccounts->id, $manageSales->id, $managePurchases->id,
-            $manageExpenses->id, $managePayroll->id, $manageSettings->id, $manageGallery->id
+            $manageExpenses->id, $managePayroll->id, $manageSettings->id, $manageGallery->id,
+            $allowBillDiscount->id
         ]);
 
         $managerRole->permissions()->sync([
             $viewReports->id, $manageServices->id, $manageAppointments->id, $bookAppointment->id,
             $manageAccounts->id, $manageSales->id, $managePurchases->id,
-            $manageExpenses->id, $managePayroll->id, $manageGallery->id
+            $manageExpenses->id, $managePayroll->id, $manageGallery->id,
+            $allowBillDiscount->id
         ]);
 
         $customerRole->permissions()->sync([
