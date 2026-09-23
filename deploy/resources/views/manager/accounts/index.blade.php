@@ -9,6 +9,7 @@
     resetPasswordModalOpen: false,
     transactionModalOpen: false,
     transactionType: 'receiving',
+    transactionAmount: '',
     categories: {{ json_encode($categories->map(fn($c) => ['id' => (int)$c->id, 'title' => $c->title])) }},
     createCategoryId: '',
     activeAccount: { id: null, name: '', balance: 0, category: '' },
@@ -66,7 +67,12 @@
             category: data.category || 'General'
         };
         this.transactionType = type;
+        this.transactionAmount = '';
         this.transactionModalOpen = true;
+        this.$nextTick(() => {
+            const input = document.getElementById('transaction_type_input');
+            if (input) input.value = type;
+        });
     },
     isCustomerCategory(catId) {
         if (!catId) return false;
@@ -428,13 +434,13 @@
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Date of Birth</label>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">🎂 Birthdate (Date of Birth)</label>
                             <input type="date" name="date_of_birth" 
                                    class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
                         </div>
 
                         <div>
-                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Anniversary Date</label>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">💍 Marriage Ceremony / Anniversary</label>
                             <input type="date" name="date_of_anniversary" 
                                    class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
                         </div>
@@ -589,13 +595,13 @@
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Date of Birth</label>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">🎂 Birthdate (Date of Birth)</label>
                             <input type="date" name="date_of_birth" x-model="editAccount.date_of_birth" 
                                    class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
                         </div>
 
                         <div>
-                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Anniversary Date</label>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">💍 Marriage Ceremony / Anniversary</label>
                             <input type="date" name="date_of_anniversary" x-model="editAccount.date_of_anniversary" 
                                    class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
                         </div>
@@ -729,20 +735,46 @@
                 </div>
                 <div class="text-right">
                     <p class="text-[10px] font-bold uppercase text-slate-400">Current Balance</p>
-                    <h4 class="text-base font-black text-slate-800" x-text="activeAccount.balance"></h4>
+                    <h4 class="text-base font-black text-slate-800" x-text="Number(activeAccount.balance).toFixed(2)"></h4>
                 </div>
             </div>
 
             <form :action="'{{ url('manager/accounts') }}/' + activeAccount.id + '/transaction'" method="POST" class="space-y-4">
                 @csrf
-                <input type="hidden" name="transaction_type" :value="transactionType">
+                <input type="hidden" id="transaction_type_input" name="transaction_type" :value="transactionType">
 
                 <div>
-                    <label class="block text-xs font-bold text-slate-700 uppercase mb-1">
-                        <span x-text="transactionType === 'receiving' ? 'Receiving Amount' : 'Payment Amount'"></span>
-                    </label>
-                    <input type="number" step="0.01" min="0.01" name="amount" required placeholder="0.00" 
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block text-xs font-bold text-slate-700 uppercase">
+                            <span x-text="transactionType === 'receiving' ? 'Receiving Amount' : 'Payment Amount'"></span>
+                        </label>
+                        <span class="text-[11px] font-semibold text-slate-500">
+                            New Balance: 
+                            <strong :class="(transactionType === 'receiving' 
+                                        ? (activeAccount.balance - (parseFloat(transactionAmount) || 0)) 
+                                        : (activeAccount.balance + (parseFloat(transactionAmount) || 0))) >= 0 ? 'text-emerald-600' : 'text-rose-600'"
+                                    x-text="(transactionType === 'receiving' 
+                                        ? (activeAccount.balance - (parseFloat(transactionAmount) || 0)) 
+                                        : (activeAccount.balance + (parseFloat(transactionAmount) || 0))).toFixed(2)">
+                            </strong>
+                        </span>
+                    </div>
+                    <input type="number" step="0.01" min="0.01" name="amount" x-model.number="transactionAmount" required placeholder="0.00" 
                            class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 text-base font-black text-slate-900 focus:ring-2 focus:ring-indigo-600">
+                    <p class="text-[11px] mt-1.5 font-medium">
+                        <template x-if="transactionType === 'receiving'">
+                            <span class="text-emerald-700 flex items-center gap-1">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
+                                Receiving amount will be <strong>deducted</strong> from current balance.
+                            </span>
+                        </template>
+                        <template x-if="transactionType === 'payment'">
+                            <span class="text-purple-700 flex items-center gap-1">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
+                                Payment amount will be <strong>added</strong> to current balance.
+                            </span>
+                        </template>
+                    </p>
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">

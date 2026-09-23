@@ -9,6 +9,7 @@
     resetPasswordModalOpen: false,
     transactionModalOpen: false,
     transactionType: 'receiving',
+    transactionAmount: '',
     categories: {{ json_encode($categories->map(fn($c) => ['id' => (int)$c->id, 'title' => $c->title])) }},
     createCategoryId: '',
     activeAccount: { id: null, name: '', balance: 0, category: '' },
@@ -25,6 +26,7 @@
         phone_no2: '', 
         card_no: '', 
         card_type: '', 
+        card_expire_date: '', 
         username: '', 
         emp_type: 'junior', 
         salary: 0, 
@@ -43,6 +45,7 @@
             phone_no2: data.phone_no2 || '',
             card_no: data.card_no || '',
             card_type: data.card_type || '',
+            card_expire_date: data.card_expire_date || '',
             username: data.username || '',
             emp_type: data.emp_type || 'junior',
             salary: Number(data.salary || 0),
@@ -66,7 +69,12 @@
             category: data.category || 'General'
         };
         this.transactionType = type;
+        this.transactionAmount = '';
         this.transactionModalOpen = true;
+        this.$nextTick(() => {
+            const input = document.getElementById('transaction_type_input');
+            if (input) input.value = type;
+        });
     },
     isCustomerCategory(catId) {
         if (!catId) return false;
@@ -213,6 +221,14 @@
                                     @if($account->card_no)
                                         <span class="font-mono text-slate-700 text-xs font-semibold">#{{ $account->card_no }}</span>
                                     @endif
+                                    @if($account->card_expire_date)
+                                        <div class="text-[11px] flex items-center gap-1 {{ $account->card_expire_date->isPast() ? 'text-rose-600 font-bold' : 'text-slate-500 font-medium' }}">
+                                            <span>Exp: {{ $account->card_expire_date->format('M d, Y') }}</span>
+                                            @if($account->card_expire_date->isPast())
+                                                <span class="px-1 py-0.2 bg-rose-100 text-rose-700 font-black text-[9px] uppercase border border-rose-200">Expired</span>
+                                            @endif
+                                        </div>
+                                    @endif
                                 </div>
                             @else
                                 <span class="text-slate-400">—</span>
@@ -287,6 +303,7 @@
                                             'phone_no2' => $account->phone_no2 ?? '', 
                                             'card_no' => $account->card_no ?? '', 
                                             'card_type' => $account->card_type ?? '', 
+                                            'card_expire_date' => $account->card_expire_date ? $account->card_expire_date->format('Y-m-d') : '', 
                                             'username' => $account->username ?? '', 
                                             'emp_type' => $account->emp_type ?? 'junior',
                                             'salary' => (float)($account->salary ?? 0),
@@ -407,7 +424,7 @@
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                             <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Card Type</label>
                             <select name="card_type" class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
@@ -424,17 +441,23 @@
                             <input type="text" name="card_no" placeholder="e.g. CRD-99823" 
                                    class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
                         </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">⏳ Card Expire Date</label>
+                            <input type="date" name="card_expire_date" 
+                                   class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
+                        </div>
                     </div>
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Date of Birth</label>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">🎂 Birthdate (Date of Birth)</label>
                             <input type="date" name="date_of_birth" 
                                    class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
                         </div>
 
                         <div>
-                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Anniversary Date</label>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">💍 Marriage Ceremony / Anniversary</label>
                             <input type="date" name="date_of_anniversary" 
                                    class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
                         </div>
@@ -568,7 +591,7 @@
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                             <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Card Type</label>
                             <select name="card_type" x-model="editAccount.card_type" class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
@@ -585,17 +608,23 @@
                             <input type="text" name="card_no" x-model="editAccount.card_no" 
                                    class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
                         </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">⏳ Card Expire Date</label>
+                            <input type="date" name="card_expire_date" x-model="editAccount.card_expire_date" 
+                                   class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
+                        </div>
                     </div>
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Date of Birth</label>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">🎂 Birthdate (Date of Birth)</label>
                             <input type="date" name="date_of_birth" x-model="editAccount.date_of_birth" 
                                    class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
                         </div>
 
                         <div>
-                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Anniversary Date</label>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">💍 Marriage Ceremony / Anniversary</label>
                             <input type="date" name="date_of_anniversary" x-model="editAccount.date_of_anniversary" 
                                    class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
                         </div>
@@ -729,20 +758,46 @@
                 </div>
                 <div class="text-right">
                     <p class="text-[10px] font-bold uppercase text-slate-400">Current Balance</p>
-                    <h4 class="text-base font-black text-slate-800" x-text="activeAccount.balance"></h4>
+                    <h4 class="text-base font-black text-slate-800" x-text="Number(activeAccount.balance).toFixed(2)"></h4>
                 </div>
             </div>
 
             <form :action="'{{ url('manager/accounts') }}/' + activeAccount.id + '/transaction'" method="POST" class="space-y-4">
                 @csrf
-                <input type="hidden" name="transaction_type" :value="transactionType">
+                <input type="hidden" id="transaction_type_input" name="transaction_type" :value="transactionType">
 
                 <div>
-                    <label class="block text-xs font-bold text-slate-700 uppercase mb-1">
-                        <span x-text="transactionType === 'receiving' ? 'Receiving Amount' : 'Payment Amount'"></span>
-                    </label>
-                    <input type="number" step="0.01" min="0.01" name="amount" required placeholder="0.00" 
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="block text-xs font-bold text-slate-700 uppercase">
+                            <span x-text="transactionType === 'receiving' ? 'Receiving Amount' : 'Payment Amount'"></span>
+                        </label>
+                        <span class="text-[11px] font-semibold text-slate-500">
+                            New Balance: 
+                            <strong :class="(transactionType === 'receiving' 
+                                        ? (activeAccount.balance - (parseFloat(transactionAmount) || 0)) 
+                                        : (activeAccount.balance + (parseFloat(transactionAmount) || 0))) >= 0 ? 'text-emerald-600' : 'text-rose-600'"
+                                    x-text="(transactionType === 'receiving' 
+                                        ? (activeAccount.balance - (parseFloat(transactionAmount) || 0)) 
+                                        : (activeAccount.balance + (parseFloat(transactionAmount) || 0))).toFixed(2)">
+                            </strong>
+                        </span>
+                    </div>
+                    <input type="number" step="0.01" min="0.01" name="amount" x-model.number="transactionAmount" required placeholder="0.00" 
                            class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 text-base font-black text-slate-900 focus:ring-2 focus:ring-indigo-600">
+                    <p class="text-[11px] mt-1.5 font-medium">
+                        <template x-if="transactionType === 'receiving'">
+                            <span class="text-emerald-700 flex items-center gap-1">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
+                                Receiving amount will be <strong>deducted</strong> from current balance.
+                            </span>
+                        </template>
+                        <template x-if="transactionType === 'payment'">
+                            <span class="text-purple-700 flex items-center gap-1">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
+                                Payment amount will be <strong>added</strong> to current balance.
+                            </span>
+                        </template>
+                    </p>
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">

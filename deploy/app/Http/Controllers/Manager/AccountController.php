@@ -180,11 +180,24 @@ class AccountController extends Controller
             $type = $validated['transaction_type'];
             $date = $validated['date'];
             
-            // Calculate new balance (Receiving or Payment reduces outstanding account balance)
-            $newBalance = round($account->balance - $amount, 2);
+            if ($type === 'receiving') {
+                // Receiving amount deducts the balance (reduces debt / credit entry)
+                $newBalance = round($account->balance - $amount, 2);
+                $debit = 0.00;
+                $credit = $amount;
+                $defaultDesc = "Payment Received from {$account->name}";
+                $prefix = 'REC-';
+            } else {
+                // Payment amount adds to the balance (debit entry)
+                $newBalance = round($account->balance + $amount, 2);
+                $debit = $amount;
+                $credit = 0.00;
+                $defaultDesc = "Cash Payment to {$account->name}";
+                $prefix = 'PAY-';
+            }
 
-            $refNo = $validated['reference_no'] ?: ($type === 'payment' ? 'PAY-' : 'REC-') . date('Ymd-His');
-            $desc = $validated['description'] ?: ($type === 'payment' ? "Cash Payment to {$account->name}" : "Payment Received from {$account->name}");
+            $refNo = !empty($validated['reference_no']) ? $validated['reference_no'] : ($prefix . date('Ymd-His'));
+            $desc = !empty($validated['description']) ? $validated['description'] : $defaultDesc;
 
             // 1. Create Ledger Entry
             \App\Models\AccountLedger::create([
@@ -193,8 +206,8 @@ class AccountController extends Controller
                 'type' => $type,
                 'reference_no' => $refNo,
                 'description' => $desc,
-                'debit' => 0.00,
-                'credit' => $amount,
+                'debit' => $debit,
+                'credit' => $credit,
                 'running_balance' => $newBalance,
             ]);
 

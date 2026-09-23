@@ -58,6 +58,7 @@ class AccountController extends Controller
             'phone_no2' => ['nullable', 'string', 'max:50'],
             'card_no' => ['nullable', 'string', 'max:50'],
             'card_type' => ['nullable', 'string', 'in:No Card,Silver,Gold,Platinum'],
+            'card_expire_date' => ['nullable', 'date'],
             'username' => ['nullable', 'string', 'max:255', 'unique:accounts,username'],
             'password' => ['nullable', 'string', 'min:6'],
             'emp_type' => ['nullable', 'string', 'in:junior,senior,Junior,Senior'],
@@ -81,6 +82,7 @@ class AccountController extends Controller
             'phone_no2' => $validated['phone_no2'] ?? null,
             'card_no' => $isCustomer ? ($validated['card_no'] ?? null) : null,
             'card_type' => $isCustomer ? ($validated['card_type'] ?? null) : null,
+            'card_expire_date' => $isCustomer ? ($validated['card_expire_date'] ?? null) : null,
             'username' => $isCustomer ? ($validated['username'] ?? null) : null,
             'password' => $isCustomer && !empty($validated['password']) ? Hash::make($validated['password']) : null,
             'emp_type' => $isEmployee ? (strtolower($validated['emp_type'] ?? '') ?: 'junior') : null,
@@ -108,6 +110,7 @@ class AccountController extends Controller
             'phone_no2' => ['nullable', 'string', 'max:50'],
             'card_no' => ['nullable', 'string', 'max:50'],
             'card_type' => ['nullable', 'string', 'in:No Card,Silver,Gold,Platinum'],
+            'card_expire_date' => ['nullable', 'date'],
             'username' => ['nullable', 'string', 'max:255', Rule::unique('accounts', 'username')->ignore($account->id)],
             'password' => ['nullable', 'string', 'min:6'],
             'emp_type' => ['nullable', 'string', 'in:junior,senior,Junior,Senior'],
@@ -131,6 +134,7 @@ class AccountController extends Controller
             'phone_no2' => $validated['phone_no2'] ?? null,
             'card_no' => $isCustomer ? ($validated['card_no'] ?? null) : null,
             'card_type' => $isCustomer ? ($validated['card_type'] ?? null) : null,
+            'card_expire_date' => $isCustomer ? ($validated['card_expire_date'] ?? null) : null,
             'username' => $isCustomer ? ($validated['username'] ?? null) : null,
             'emp_type' => $isEmployee ? (strtolower($validated['emp_type'] ?? '') ?: 'junior') : null,
             'salary' => $isEmployee ? (float) ($validated['salary'] ?? 0.00) : 0.00,
@@ -180,11 +184,24 @@ class AccountController extends Controller
             $type = $validated['transaction_type'];
             $date = $validated['date'];
             
-            // Calculate new balance (Receiving or Payment reduces outstanding account balance)
-            $newBalance = round($account->balance - $amount, 2);
+            if ($type === 'receiving') {
+                // Receiving amount deducts the balance (reduces debt / credit entry)
+                $newBalance = round($account->balance - $amount, 2);
+                $debit = 0.00;
+                $credit = $amount;
+                $defaultDesc = "Payment Received from {$account->name}";
+                $prefix = 'REC-';
+            } else {
+                // Payment amount adds to the balance (debit entry)
+                $newBalance = round($account->balance + $amount, 2);
+                $debit = $amount;
+                $credit = 0.00;
+                $defaultDesc = "Cash Payment to {$account->name}";
+                $prefix = 'PAY-';
+            }
 
-            $refNo = $validated['reference_no'] ?: ($type === 'payment' ? 'PAY-' : 'REC-') . date('Ymd-His');
-            $desc = $validated['description'] ?: ($type === 'payment' ? "Cash Payment to {$account->name}" : "Payment Received from {$account->name}");
+            $refNo = !empty($validated['reference_no']) ? $validated['reference_no'] : ($prefix . date('Ymd-His'));
+            $desc = !empty($validated['description']) ? $validated['description'] : $defaultDesc;
 
             // 1. Create Ledger Entry
             \App\Models\AccountLedger::create([
@@ -193,8 +210,8 @@ class AccountController extends Controller
                 'type' => $type,
                 'reference_no' => $refNo,
                 'description' => $desc,
-                'debit' => 0.00,
-                'credit' => $amount,
+                'debit' => $debit,
+                'credit' => $credit,
                 'running_balance' => $newBalance,
             ]);
 
