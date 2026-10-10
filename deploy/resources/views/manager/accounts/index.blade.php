@@ -26,6 +26,7 @@
         phone_no2: '', 
         card_no: '', 
         card_type: '', 
+        card_expire_date: '', 
         username: '', 
         emp_type: 'junior', 
         salary: 0, 
@@ -44,6 +45,7 @@
             phone_no2: data.phone_no2 || '',
             card_no: data.card_no || '',
             card_type: data.card_type || '',
+            card_expire_date: data.card_expire_date || '',
             username: data.username || '',
             emp_type: data.emp_type || 'junior',
             salary: Number(data.salary || 0),
@@ -219,6 +221,14 @@
                                     @if($account->card_no)
                                         <span class="font-mono text-slate-700 text-xs font-semibold">#{{ $account->card_no }}</span>
                                     @endif
+                                    @if($account->card_expire_date)
+                                        <div class="text-[11px] flex items-center gap-1 {{ $account->card_expire_date->isPast() ? 'text-rose-600 font-bold' : 'text-slate-500 font-medium' }}">
+                                            <span>Exp: {{ $account->card_expire_date->format('M d, Y') }}</span>
+                                            @if($account->card_expire_date->isPast())
+                                                <span class="px-1 py-0.2 bg-rose-100 text-rose-700 font-black text-[9px] uppercase border border-rose-200">Expired</span>
+                                            @endif
+                                        </div>
+                                    @endif
                                 </div>
                             @else
                                 <span class="text-slate-400">—</span>
@@ -293,6 +303,7 @@
                                             'phone_no2' => $account->phone_no2 ?? '', 
                                             'card_no' => $account->card_no ?? '', 
                                             'card_type' => $account->card_type ?? '', 
+                                            'card_expire_date' => $account->card_expire_date ? $account->card_expire_date->format('Y-m-d') : '', 
                                             'username' => $account->username ?? '', 
                                             'emp_type' => $account->emp_type ?? 'junior',
                                             'salary' => (float)($account->salary ?? 0),
@@ -413,7 +424,7 @@
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                             <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Card Type</label>
                             <select name="card_type" class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
@@ -428,6 +439,12 @@
                         <div>
                             <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Card Number (Optional)</label>
                             <input type="text" name="card_no" placeholder="e.g. CRD-99823" 
+                                   class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">⏳ Card Expire Date</label>
+                            <input type="date" name="card_expire_date" 
                                    class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
                         </div>
                     </div>
@@ -574,7 +591,7 @@
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
                             <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Card Type</label>
                             <select name="card_type" x-model="editAccount.card_type" class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
@@ -589,6 +606,12 @@
                         <div>
                             <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Card Number (Optional)</label>
                             <input type="text" name="card_no" x-model="editAccount.card_no" 
+                                   class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">⏳ Card Expire Date</label>
+                            <input type="date" name="card_expire_date" x-model="editAccount.card_expire_date" 
                                    class="w-full px-4 py-2.5 bg-white border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600">
                         </div>
                     </div>

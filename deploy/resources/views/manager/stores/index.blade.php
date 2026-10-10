@@ -131,12 +131,12 @@
     <div class="bg-white border border-slate-200 shadow-sm overflow-hidden">
         <div class="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <h2 class="text-xs font-black uppercase tracking-wider text-slate-700">All Registered Stores & Branches</h2>
-            <form method="GET" action="{{ route('manager.stores.index') }}" class="flex items-center gap-2">
+            <form method="GET" action="{{ route('manager.stores.index') }}" class="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full sm:w-auto">
                 <input type="text" name="search" value="{{ $search }}" placeholder="Search by name, code, phone..." 
-                       class="text-xs font-medium px-3 py-1.5 bg-white border border-slate-300 focus:border-indigo-600 focus:ring-0">
-                <button type="submit" class="px-3 py-1.5 bg-slate-900 text-white font-bold text-xs">Search</button>
+                       class="text-xs font-medium px-3 py-1.5 bg-white border border-slate-300 focus:border-indigo-600 focus:ring-0 flex-1 sm:w-64">
+                <button type="submit" class="px-3 py-1.5 bg-slate-900 text-white font-bold text-xs shrink-0">Search</button>
                 @if($search)
-                    <a href="{{ route('manager.stores.index') }}" class="px-2.5 py-1.5 bg-slate-200 text-slate-700 text-xs font-bold">Reset</a>
+                    <a href="{{ route('manager.stores.index') }}" class="px-2.5 py-1.5 bg-slate-200 text-slate-700 text-xs font-bold shrink-0">Reset</a>
                 @endif
             </form>
         </div>

@@ -93,106 +93,111 @@
     <!-- Main Grid Section -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        <!-- Appointments Schedule -->
-        <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs space-y-5">
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div>
-                    <h3 class="text-base font-black text-slate-900 heading-font">
-                        {{ $isFallbackSchedule ? 'Recent Saloon Appointments' : "Today's Appointment Schedule" }}
-                    </h3>
-                    <p class="text-xs text-slate-500 font-medium mt-0.5">
-                        {{ $isFallbackSchedule ? 'Showing latest recorded bookings from database' : 'Real-time schedule for today\'s active salon services' }}
-                    </p>
+        <!-- Appointments Schedule & Celebrations Hub -->
+        <div class="lg:col-span-2 space-y-6">
+            <div class="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs space-y-5">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                        <h3 class="text-base font-black text-slate-900 heading-font">
+                            {{ $isFallbackSchedule ? 'Recent Saloon Appointments' : "Today's Appointment Schedule" }}
+                        </h3>
+                        <p class="text-xs text-slate-500 font-medium mt-0.5">
+                            {{ $isFallbackSchedule ? 'Showing latest recorded bookings from database' : 'Real-time schedule for today\'s active salon services' }}
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <a href="{{ route('manager.appointments.index') }}" class="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors shadow-xs">
+                            View Calendar &rarr;
+                        </a>
+                    </div>
                 </div>
-                <div class="flex items-center gap-2">
-                    <a href="{{ route('manager.appointments.index') }}" class="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors shadow-xs">
-                        View Calendar &rarr;
-                    </a>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-slate-50 text-slate-400 text-[10px] font-black uppercase tracking-wider border-b border-slate-100 rounded-xl">
+                                <th class="py-3 px-4 rounded-l-xl">Time / Date</th>
+                                <th class="py-3 px-4">Client</th>
+                                <th class="py-3 px-4">Treatment</th>
+                                <th class="py-3 px-4">Stylist</th>
+                                <th class="py-3 px-4 text-right rounded-r-xl">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 text-xs">
+                            @forelse($todayAppointments as $apt)
+                            <tr class="hover:bg-indigo-50/40 transition-colors">
+                                <td class="py-3.5 px-4 font-bold text-slate-900">
+                                    @if($apt->start_time)
+                                        <span class="text-indigo-600 font-extrabold">{{ date('h:i A', strtotime($apt->start_time)) }}</span>
+                                        <span class="block text-[10px] text-slate-400 font-medium">{{ $apt->appointment_date ? $apt->appointment_date->format('M d, Y') : '' }}</span>
+                                    @else
+                                        <span>{{ $apt->appointment_date ? $apt->appointment_date->format('M d, Y') : '—' }}</span>
+                                    @endif
+                                </td>
+                                <td class="py-3.5 px-4">
+                                    <div class="flex items-center gap-2.5">
+                                        <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-indigo-600 to-purple-600 text-white font-black flex items-center justify-center text-[10px] shadow-xs shrink-0">
+                                            {{ strtoupper(substr($apt->customer->name ?? 'WC', 0, 2)) }}
+                                        </div>
+                                        <div>
+                                            <span class="font-bold text-slate-800 block">{{ $apt->customer->name ?? 'Walk-in Client' }}</span>
+                                            <span class="text-[10px] text-slate-400 font-mono">#{{ $apt->booking_no }}</span>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td class="py-3.5 px-4 text-slate-600 font-semibold max-w-[150px] truncate">
+                                    {{ $apt->items->map(fn($item) => $item->service->title ?? 'Service')->implode(', ') ?: 'Saloon Treatment' }}
+                                </td>
+                                <td class="py-3.5 px-4 text-slate-600 font-medium">
+                                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[11px] font-semibold">
+                                        👤 {{ $apt->employee->name ?? 'Unassigned' }}
+                                    </span>
+                                </td>
+                                <td class="py-3.5 px-4 text-right">
+                                    @if($apt->status == 'completed')
+                                        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-black text-[10px] uppercase border border-emerald-200">
+                                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                            Completed
+                                        </span>
+                                    @elseif($apt->status == 'confirmed')
+                                        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 font-black text-[10px] uppercase border border-blue-200">
+                                            <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                                            Confirmed
+                                        </span>
+                                    @elseif($apt->status == 'pending')
+                                        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 font-black text-[10px] uppercase border border-amber-200">
+                                            <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                                            Pending
+                                        </span>
+                                    @else
+                                        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 font-black text-[10px] uppercase border border-rose-200">
+                                            <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                                            Cancelled
+                                        </span>
+                                    @endif
+                                </td>
+                            </tr>
+                            @empty
+                            <tr>
+                                <td colspan="5" class="py-12 text-center text-slate-400">
+                                    <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-3">
+                                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                                    </div>
+                                    <p class="text-sm font-bold text-slate-700">No salon appointment bookings yet</p>
+                                    <p class="text-xs text-slate-400 mt-1">Book customer treatments directly into the live calendar.</p>
+                                    <a href="{{ route('manager.appointments.index') }}" class="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-indigo-600 text-white font-bold text-xs rounded-xl hover:bg-indigo-700 transition-colors shadow-sm">
+                                        + Book First Appointment
+                                    </a>
+                                </td>
+                            </tr>
+                            @endforelse
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
-            <div class="overflow-x-auto">
-                <table class="w-full text-left border-collapse">
-                    <thead>
-                        <tr class="bg-slate-50 text-slate-400 text-[10px] font-black uppercase tracking-wider border-b border-slate-100 rounded-xl">
-                            <th class="py-3 px-4 rounded-l-xl">Time / Date</th>
-                            <th class="py-3 px-4">Client</th>
-                            <th class="py-3 px-4">Treatment</th>
-                            <th class="py-3 px-4">Stylist</th>
-                            <th class="py-3 px-4 text-right rounded-r-xl">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-100 text-xs">
-                        @forelse($todayAppointments as $apt)
-                        <tr class="hover:bg-indigo-50/40 transition-colors">
-                            <td class="py-3.5 px-4 font-bold text-slate-900">
-                                @if($apt->start_time)
-                                    <span class="text-indigo-600 font-extrabold">{{ date('h:i A', strtotime($apt->start_time)) }}</span>
-                                    <span class="block text-[10px] text-slate-400 font-medium">{{ $apt->appointment_date ? $apt->appointment_date->format('M d, Y') : '' }}</span>
-                                @else
-                                    <span>{{ $apt->appointment_date ? $apt->appointment_date->format('M d, Y') : '—' }}</span>
-                                @endif
-                            </td>
-                            <td class="py-3.5 px-4">
-                                <div class="flex items-center gap-2.5">
-                                    <div class="w-7 h-7 rounded-lg bg-gradient-to-tr from-indigo-600 to-purple-600 text-white font-black flex items-center justify-center text-[10px] shadow-xs shrink-0">
-                                        {{ strtoupper(substr($apt->customer->name ?? 'WC', 0, 2)) }}
-                                    </div>
-                                    <div>
-                                        <span class="font-bold text-slate-800 block">{{ $apt->customer->name ?? 'Walk-in Client' }}</span>
-                                        <span class="text-[10px] text-slate-400 font-mono">#{{ $apt->booking_no }}</span>
-                                    </div>
-                                </div>
-                            </td>
-                            <td class="py-3.5 px-4 text-slate-600 font-semibold max-w-[150px] truncate">
-                                {{ $apt->items->map(fn($item) => $item->service->title ?? 'Service')->implode(', ') ?: 'Saloon Treatment' }}
-                            </td>
-                            <td class="py-3.5 px-4 text-slate-600 font-medium">
-                                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[11px] font-semibold">
-                                    👤 {{ $apt->employee->name ?? 'Unassigned' }}
-                                </span>
-                            </td>
-                            <td class="py-3.5 px-4 text-right">
-                                @if($apt->status == 'completed')
-                                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-black text-[10px] uppercase border border-emerald-200">
-                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                                        Completed
-                                    </span>
-                                @elseif($apt->status == 'confirmed')
-                                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 font-black text-[10px] uppercase border border-blue-200">
-                                        <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                                        Confirmed
-                                    </span>
-                                @elseif($apt->status == 'pending')
-                                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 font-black text-[10px] uppercase border border-amber-200">
-                                        <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-                                        Pending
-                                    </span>
-                                @else
-                                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 font-black text-[10px] uppercase border border-rose-200">
-                                        <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
-                                        Cancelled
-                                    </span>
-                                @endif
-                            </td>
-                        </tr>
-                        @empty
-                        <tr>
-                            <td colspan="5" class="py-12 text-center text-slate-400">
-                                <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-3">
-                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                                </div>
-                                <p class="text-sm font-bold text-slate-700">No salon appointment bookings yet</p>
-                                <p class="text-xs text-slate-400 mt-1">Book customer treatments directly into the live calendar.</p>
-                                <a href="{{ route('manager.appointments.index') }}" class="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-indigo-600 text-white font-bold text-xs rounded-xl hover:bg-indigo-700 transition-colors shadow-sm">
-                                    + Book First Appointment
-                                </a>
-                            </td>
-                        </tr>
-                        @endforelse
-                    </tbody>
-                </table>
-            </div>
+            <!-- Client Birthdays & Anniversaries Celebrations Hub -->
+            @include('partials.celebrations-widget')
         </div>
 
         <!-- Quick Workflow Actions & Popular Services -->

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Manager;
 use App\Http\Controllers\Controller;
 use App\Models\ServiceCategory;
 use Illuminate\Http\Request;
+use App\Services\ImageUploadService;
 
 class ServiceCategoryController extends Controller
 {
@@ -40,10 +41,7 @@ class ServiceCategoryController extends Controller
 
         $imagePath = null;
         if ($request->hasFile('image')) {
-            $file = $request->file('image');
-            $fileName = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-            $path = $file->storeAs('categories', $fileName, 'public');
-            $imagePath = 'storage/' . $path;
+            $imagePath = ImageUploadService::upload($request->file('image'), 'categories');
         }
 
         ServiceCategory::create([
@@ -69,13 +67,8 @@ class ServiceCategoryController extends Controller
 
         $imagePath = $serviceCategory->image;
         if ($request->hasFile('image')) {
-            if ($serviceCategory->image && file_exists(public_path($serviceCategory->image))) {
-                @unlink(public_path($serviceCategory->image));
-            }
-            $file = $request->file('image');
-            $fileName = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-            $path = $file->storeAs('categories', $fileName, 'public');
-            $imagePath = 'storage/' . $path;
+            ImageUploadService::delete($serviceCategory->image);
+            $imagePath = ImageUploadService::upload($request->file('image'), 'categories');
         }
 
         $serviceCategory->update([
@@ -93,9 +86,7 @@ class ServiceCategoryController extends Controller
      */
     public function destroy(ServiceCategory $serviceCategory)
     {
-        if ($serviceCategory->image && file_exists(public_path($serviceCategory->image))) {
-            @unlink(public_path($serviceCategory->image));
-        }
+        ImageUploadService::delete($serviceCategory->image);
 
         $serviceCategory->delete();
 

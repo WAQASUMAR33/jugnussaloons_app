@@ -10,14 +10,19 @@ use App\Models\AppointmentService;
 use App\Models\SaloonService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Services\ImageUploadService;
 
 class AppointmentController extends Controller
 {
     /**
-     * Display service appointments listing & booking interface.
+     * Display service appointments booking history.
      */
     public function index(Request $request)
     {
+        if ($request->query('tab') === 'pos' || $request->query('mode') === 'new') {
+            return redirect()->route('manager.appointments.create');
+        }
+
         $search = $request->input('search');
         $status = $request->input('status');
         $date = $request->input('date');
@@ -44,7 +49,10 @@ class AppointmentController extends Controller
         }
 
         if ($date) {
-            $query->whereDate('appointment_date', $date);
+            $query->where(function($q) use ($date) {
+                $q->whereDate('appointment_date', $date)
+                  ->orWhereDate('created_at', $date);
+            });
         }
 
         if ($orderType) {
@@ -66,6 +74,7 @@ class AppointmentController extends Controller
         $appointments = $query->orderBy('id', 'desc')->paginate(10)->withQueryString();
 
         // Metrics for Online vs On-Site Bookings
+        $totalBookingsCount = Appointment::count();
         $onlineBookingsCount = Appointment::where('order_type', 'Online')->count();
         $onSiteBookingsCount = Appointment::where(function($q) {
             $q->where('order_type', 'On Site')->orWhereNull('order_type');
@@ -76,7 +85,77 @@ class AppointmentController extends Controller
         $avgSaloonRanking = round((float) (Appointment::whereNotNull('ranking')->avg('ranking') ?: 0), 1);
         $fiveStarCount = Appointment::where('ranking', 5)->count();
 
-        // 1. Fetch Customer accounts & Ensure Walk-in Customer is default
+        // Fetch Staff / Employee Accounts for Filter Dropdown and Quick Rating
+        $employees = Account::where(function($q) {
+            $q->whereHas('category', function ($cq) {
+                $cq->where('title', 'like', '%Employee%')
+                   ->orWhere('title', 'like', '%Staff%')
+                   ->orWhere('title', 'like', '%Stylist%')
+                   ->orWhere('title', 'like', '%Barber%');
+            })->orWhere(function($sq) {
+                $sq->whereNotNull('emp_type')->where('emp_type', '!=', '');
+            });
+        })->with('category')->orderBy('name')->get();
+
+        if ($employees->isEmpty()) {
+            $employees = Account::whereHas('category', function ($q) {
+                $q->where('title', 'not like', '%Supplier%')
+                  ->where('title', 'not like', '%Vendor%');
+            })->orWhereDoesntHave('category')->with('category')->orderBy('name')->get();
+        }
+
+        $brandSettings = \App\Models\Setting::getSettings();
+
+        return view('manager.appointments.index', compact(
+            'appointments', 
+            'employees',
+            'brandSettings',
+            'search', 
+            'status', 
+            'date',
+            'orderType',
+            'employeeId',
+            'ranking',
+            'totalBookingsCount',
+            'onlineBookingsCount',
+            'onSiteBookingsCount',
+            'totalRankedCount',
+            'avgSaloonRanking',
+            'fiveStarCount'
+        ));
+    }
+
+    /**
+     * Show the dedicated New Bill / Service POS checkout terminal.
+     */
+    public function create(Request $request)
+    {
+        $data = $this->getBookingFormData();
+        $editingAppointment = null;
+        if ($request->filled('edit')) {
+            $editingAppointment = Appointment::with(['customer', 'employee', 'items.service'])->find($request->input('edit'));
+        }
+        $data['editingAppointment'] = $editingAppointment;
+
+        return view('manager.appointments.create', $data);
+    }
+
+    /**
+     * Edit an existing service appointment in the dedicated checkout terminal.
+     */
+    public function edit(Appointment $appointment)
+    {
+        $data = $this->getBookingFormData();
+        $data['editingAppointment'] = $appointment->load(['customer', 'employee', 'items.service']);
+
+        return view('manager.appointments.create', $data);
+    }
+
+    /**
+     * Get shared datasets needed for the billing & POS checkout terminal.
+     */
+    private function getBookingFormData()
+    {
         $customerCategory = \App\Models\AccountCategory::where('title', 'like', '%Customer%')
             ->orWhere('title', 'like', '%Client%')
             ->first();
@@ -141,29 +220,21 @@ class AppointmentController extends Controller
             })->orWhereDoesntHave('category')->with('category')->orderBy('name')->get();
         }
 
-        // 2. Fetch Saloon Services & Categories for the filterable services catalog
         $saloonServices = SaloonService::with('category')->orderBy('title')->get();
         $serviceCategories = \App\Models\ServiceCategory::with('services')->orderBy('title')->get();
+        $brandSettings = \App\Models\Setting::getSettings();
+        $totalBookingsCount = Appointment::count();
 
-        return view('manager.appointments.index', compact(
-            'appointments', 
-            'customers', 
-            'employees',
+        return compact(
+            'customers',
+            'walkinCustomer',
             'defaultCustomer',
-            'saloonServices', 
+            'employees',
+            'saloonServices',
             'serviceCategories',
-            'search', 
-            'status', 
-            'date',
-            'orderType',
-            'employeeId',
-            'ranking',
-            'onlineBookingsCount',
-            'onSiteBookingsCount',
-            'totalRankedCount',
-            'avgSaloonRanking',
-            'fiveStarCount'
-        ));
+            'brandSettings',
+            'totalBookingsCount'
+        );
     }
 
     /**
@@ -178,15 +249,14 @@ class AppointmentController extends Controller
             'appointment_date' => ['required', 'date'],
             'start_time' => ['nullable', 'string'],
             'status' => ['nullable', 'string', 'in:pending,confirmed,completed,cancelled'],
-            'ranking' => ['nullable', 'integer', 'min:1', 'max:5'],
-            'ranking_notes' => ['nullable', 'string', 'max:1000'],
             'discount_type' => ['nullable', 'string', 'in:fixed,percentage'],
             'discount' => ['nullable', 'numeric', 'min:0'],
             'discount_percentage' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'paid_amount' => ['required', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string', 'max:1000'],
             'receipt_image' => ['nullable', 'file', 'image', 'max:5120'],
-            'payment_mode' => ['nullable', 'string', 'in:Cash,Card,Bank,Other'],
+            'payment_mode' => ['nullable', 'string', 'in:Cash,Card,Bank,Other,Split'],
+            'split_payments' => ['nullable'],
             'extra_amount' => ['nullable', 'numeric', 'min:0'],
             'service_ids' => ['required', 'array', 'min:1'],
             'service_ids.*' => ['required', 'exists:services,id'],
@@ -194,40 +264,57 @@ class AppointmentController extends Controller
             'service_quantities.*' => ['nullable', 'numeric', 'min:1'],
             'service_custom_titles' => ['nullable', 'array'],
             'service_prices' => ['nullable', 'array'],
+            'service_discounts' => ['nullable', 'array'],
+            'service_discount_types' => ['nullable', 'array'],
             'admin_password' => ['nullable', 'string'],
         ]);
 
         $receiptPath = null;
         if ($request->hasFile('receipt_image')) {
-            $file = $request->file('receipt_image');
-            $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-            $file->move(public_path('uploads/receipts'), $filename);
-            $receiptPath = 'uploads/receipts/' . $filename;
+            $receiptPath = ImageUploadService::upload($request->file('receipt_image'), 'receipts', 'receipt');
         }
 
-        $requiresAdminApproval = false;
-
-        DB::transaction(function () use ($validated, $receiptPath, $request, &$requiresAdminApproval) {
+        DB::transaction(function () use ($validated, $receiptPath, $request) {
             $customer = Account::findOrFail($validated['account_id']);
             $employeeId = !empty($validated['employee_id']) ? (int) $validated['employee_id'] : null;
-            $ranking = !empty($validated['ranking']) ? (int) $validated['ranking'] : null;
-            $rankingNotes = $validated['ranking_notes'] ?? null;
             $appointmentDate = $validated['appointment_date'];
             $paidAmount = (float) $validated['paid_amount'];
             $paymentMode = $validated['payment_mode'] ?? 'Cash';
-            $extraAmount = in_array($paymentMode, ['Card', 'Bank']) ? (float) ($validated['extra_amount'] ?? 0) : 0.00;
+            $extraAmount = (in_array($paymentMode, ['Card', 'Bank']) || $paymentMode === 'Split') ? (float) ($validated['extra_amount'] ?? 0) : 0.00;
             $appointmentStatus = $validated['status'] ?? 'confirmed';
+
+            // Process split payments breakdown if mode is Split
+            $splitPayments = null;
+            if ($paymentMode === 'Split') {
+                $rawSplits = $request->input('split_payments');
+                if (is_string($rawSplits)) {
+                    $splitPayments = json_decode($rawSplits, true);
+                } elseif (is_array($rawSplits)) {
+                    $splitPayments = $rawSplits;
+                }
+                if (is_array($splitPayments)) {
+                    $splitPayments = [
+                        'Cash' => max(0, (float)($splitPayments['Cash'] ?? 0)),
+                        'Card' => max(0, (float)($splitPayments['Card'] ?? 0)),
+                        'Bank' => max(0, (float)($splitPayments['Bank'] ?? 0)),
+                        'Other' => max(0, (float)($splitPayments['Other'] ?? 0)),
+                    ];
+                    $paidAmount = array_sum($splitPayments);
+                }
+            }
 
             // Auto Generate Booking Number
             $bookingNo = 'APT-' . date('Ym') . '-' . str_pad(Appointment::count() + 1, 4, '0', STR_PAD_LEFT);
 
-            // Calculate service totals, custom titles, and multi-quantities
+            // Calculate service totals, custom titles, multi-quantities, and service-level discounts
             $serviceIds = $request->input('service_ids', []);
             $serviceQuantities = $request->input('service_quantities', []);
             $serviceCustomTitles = $request->input('service_custom_titles', []);
             $servicePrices = $request->input('service_prices', []);
+            $serviceDiscounts = $request->input('service_discounts', []);
+            $serviceDiscountTypes = $request->input('service_discount_types', []);
 
-            $services = SaloonService::whereIn('id', $serviceIds)->get()->keyBy('id');
+            $services = SaloonService::with('category')->whereIn('id', $serviceIds)->get()->keyBy('id');
             $grossTotal = 0;
             $processedLineItems = [];
 
@@ -240,51 +327,76 @@ class AppointmentController extends Controller
                     ? (int)$serviceQuantities[$index]
                     : 1;
 
-                // Custom or Standard Unit Price
-                $unitPrice = (isset($servicePrices[$index]) && is_numeric($servicePrices[$index]))
+                // Base catalog price or custom price
+                $basePrice = (isset($servicePrices[$index]) && is_numeric($servicePrices[$index]))
                     ? max(0, (float)$servicePrices[$index])
-                    : (float)($srv->discounted_price ?: $srv->price ?: 0);
+                    : (float)($srv->price ?: $srv->discounted_price ?: 0);
 
-                $lineTotal = round($unitPrice * $qty, 2);
+                // Service-level discount
+                $rawDiscount = (isset($serviceDiscounts[$index]) && is_numeric($serviceDiscounts[$index]))
+                    ? max(0, (float)$serviceDiscounts[$index])
+                    : 0.00;
+
+                $discType = (isset($serviceDiscountTypes[$index]) && in_array($serviceDiscountTypes[$index], ['percentage', 'fixed']))
+                    ? $serviceDiscountTypes[$index]
+                    : 'percentage';
+
+                if ($discType === 'percentage') {
+                    $discPct = min(100, max(0, $rawDiscount));
+                    $itemDiscountPerUnit = round($basePrice * ($discPct / 100), 2);
+                } else {
+                    $itemDiscountPerUnit = min($basePrice, max(0, $rawDiscount));
+                }
+
+                $unitNetPrice = max(0, round($basePrice - $itemDiscountPerUnit, 2));
+                $lineTotal = round($unitNetPrice * $qty, 2);
 
                 // Custom Title if passed (e.g. for Ad Ons)
                 $customTitle = isset($serviceCustomTitles[$index]) && trim($serviceCustomTitles[$index]) !== ''
                     ? trim($serviceCustomTitles[$index])
-                    : null;
-
-                $grossTotal += $lineTotal;
+                    : $srv->title;
 
                 $processedLineItems[] = [
                     'saloon_service_id' => $srv->id,
                     'custom_title' => $customTitle,
                     'quantity' => $qty,
-                    'price' => $unitPrice,
-                    'discount' => 0.00,
+                    'price' => $basePrice,
+                    'discount' => round($itemDiscountPerUnit * $qty, 2),
                     'discounted_price' => $lineTotal,
                     'commission' => 0.00,
                 ];
+
+                $grossTotal += $lineTotal;
             }
 
-            $discountType = $validated['discount_type'] ?? 'fixed';
-            $rawDiscountVal = (float) ($validated['discount'] ?? 0);
-            $rawDiscountPct = (float) ($validated['discount_percentage'] ?? 0);
+            // Customer Card Tier Discount Rules:
+            // 1. Silver Card: Fixed 5%
+            // 2. Gold Card: Fixed 15%
+            // 3. Platinum Card: Fixed 20%
+            // No Card: Normal flow (Permission allows any number, no permission allows max 10%)
+            $cardTypeLower = strtolower(trim($customer->card_type ?? ''));
+            $isCardFixed = false;
+            $cardFixedPct = null;
 
-            if ($discountType === 'percentage') {
-                $discountPercentage = min(100, max(0, $rawDiscountPct));
-                $billDiscount = round(($grossTotal * $discountPercentage) / 100, 2);
-            } else {
-                $billDiscount = min($grossTotal, max(0, $rawDiscountVal));
-                $discountPercentage = $grossTotal > 0 ? round(($billDiscount / $grossTotal) * 100, 2) : 0.00;
+            if (str_contains($cardTypeLower, 'silver')) {
+                $isCardFixed = true;
+                $cardFixedPct = 5.00;
+            } elseif (str_contains($cardTypeLower, 'gold')) {
+                $isCardFixed = true;
+                $cardFixedPct = 15.00;
+            } elseif (str_contains($cardTypeLower, 'platinum')) {
+                $isCardFixed = true;
+                $cardFixedPct = 20.00;
             }
 
-            // Check Permissions
             $isAdmin = auth()->user()->hasRole('admin');
+            $hasDiscountPermission = $isAdmin || auth()->user()->canGiveDiscount();
             $adminAuthorized = false;
 
             if ($request->filled('admin_password')) {
                 $adminPassword = $request->input('admin_password');
                 $adminUsers = \App\Models\User::whereHas('roles', function ($q) {
-                    $q->where('name', 'admin');
+                    $q->where('slug', 'admin')->orWhere('name', 'admin')->orWhere('name', 'Administrator');
                 })->get();
                 foreach ($adminUsers as $adminUser) {
                     if (\Illuminate\Support\Facades\Hash::check($adminPassword, $adminUser->password)) {
@@ -294,21 +406,87 @@ class AppointmentController extends Controller
                 }
             }
 
-            $hasDiscountPermission = $isAdmin || auth()->user()->hasPermission('allow-bill-discount');
+            // Separate items into:
+            // 1. Non-discounted, non-addon items => eligible for bill discount
+            // 2. Add-On services => NEVER receive bill discount (even if not individually discounted)
+            // 3. Already-individually-discounted items => also not eligible for bill discount
+            $nonDiscountedTotal = 0.00;
+            $discountedTotal = 0.00;
+            $hasDiscountedItem = false;
+            foreach ($processedLineItems as $item) {
+                $srv = $services[$item['saloon_service_id']] ?? null;
+                $isItemDiscounted = false;
+                $isAddonService = $this->isAddOnService($srv);
+                if ($srv) {
+                    $origPrice = (float) ($srv->price ?? 0);
+                    $discPct = (float) ($srv->discount ?? 0);
+                    $discPrice = (float) ($srv->discounted_price ?? 0);
+                    $unitPrice = (float) ($item['price'] ?? 0);
+                    $itemDiscAmt = (float) ($item['discount'] ?? 0);
+                    if ($itemDiscAmt > 0 || $discPct > 0 || ($discPrice > 0 && $discPrice < $origPrice) || ($origPrice > 0 && $unitPrice < $origPrice)) {
+                        $isItemDiscounted = true;
+                    }
+                }
 
-            if ($discountPercentage <= 10.00) {
-                // Up to 10% discount: Allowed for every user unconditionally
+                if ($isItemDiscounted || $isAddonService) {
+                    // Add-ons and individually-discounted items are NOT eligible for bill discount
+                    $hasDiscountedItem = $hasDiscountedItem || $isItemDiscounted;
+                    $discountedTotal += (float) $item['discounted_price'];
+                } else {
+                    $nonDiscountedTotal += (float) $item['discounted_price'];
+                }
+            }
+
+            // The discount base is ONLY the sum of non-discounted items
+            $eligibleDiscountBase = $nonDiscountedTotal;
+
+            if ($eligibleDiscountBase <= 0) {
+                // All items in cart are already discounted: no bill or card discount allowed
+                $discountType = 'percentage';
+                $discountPercentage = 0.00;
+                $billDiscount = 0.00;
+                $discountStatus = 'approved';
+                $discountApprovedBy = auth()->id();
+            } elseif ($isCardFixed) {
+                // Fixed cardholder discount: applies ONLY to the sum of non-discounted items
+                $discountType = 'percentage';
+                $discountPercentage = $cardFixedPct;
+                $billDiscount = round(($eligibleDiscountBase * $discountPercentage) / 100, 2);
                 $discountStatus = 'approved';
                 $discountApprovedBy = auth()->id();
             } else {
-                // Greater than 10%: Allowed only for users with allow-bill-discount permission or admin (or authorized via admin password)
-                if ($hasDiscountPermission || $adminAuthorized) {
+                // Normal flow: No Card - discount applies ONLY to the sum of non-discounted items
+                $discountType = $validated['discount_type'] ?? 'fixed';
+                $rawDiscountVal = (float) ($validated['discount'] ?? 0);
+                $rawDiscountPct = (float) ($validated['discount_percentage'] ?? 0);
+
+                if ($discountType === 'percentage') {
+                    $discountPercentage = min(100, max(0, $rawDiscountPct));
+                    $billDiscount = round(($eligibleDiscountBase * $discountPercentage) / 100, 2);
+                } else {
+                    $billDiscount = min($eligibleDiscountBase, max(0, $rawDiscountVal));
+                    $discountPercentage = $eligibleDiscountBase > 0 ? round(($billDiscount / $eligibleDiscountBase) * 100, 2) : 0.00;
+                }
+
+                if ($billDiscount > 0) {
+                    if ($hasDiscountPermission || $isAdmin) {
+                        // User has permission: can allow at any number
+                        $discountStatus = 'approved';
+                        $discountApprovedBy = auth()->id();
+                    } else {
+                        // Not allowed permission: just only for 10% and less
+                        if ($discountPercentage <= 10.00 || $adminAuthorized) {
+                            $discountStatus = 'approved';
+                            $discountApprovedBy = auth()->id();
+                        } else {
+                            throw \Illuminate\Validation\ValidationException::withMessages([
+                                'discount' => ["A discount of {$discountPercentage}% exceeds your allowed limit of 10%. Administrator authorization password is required."]
+                            ]);
+                        }
+                    }
+                } else {
                     $discountStatus = 'approved';
                     $discountApprovedBy = auth()->id();
-                } else {
-                    $discountStatus = 'pending_approval';
-                    $requiresAdminApproval = true;
-                    $discountApprovedBy = null;
                 }
             }
 
@@ -334,28 +512,12 @@ class AppointmentController extends Controller
                 'balance_due' => $balanceDue,
                 'total_commission' => 0.00,
                 'status' => $appointmentStatus,
-                'ranking' => $ranking,
-                'ranking_notes' => $rankingNotes,
-                'ranked_by' => $ranking ? auth()->id() : null,
-                'ranked_at' => $ranking ? now() : null,
                 'notes' => $validated['notes'] ?? null,
                 'receipt_image' => $receiptPath,
                 'payment_mode' => $paymentMode,
+                'split_payments' => $splitPayments,
                 'extra_amount' => $extraAmount,
             ]);
-
-            // If discount percentage > 10% and not authorized, generate DiscountRequest notification for Admin
-            if ($discountPercentage > 10.00 && !$hasDiscountPermission && !$adminAuthorized) {
-                \App\Models\DiscountRequest::create([
-                    'appointment_id' => $appointment->id,
-                    'requested_by_user_id' => auth()->id(),
-                    'gross_amount' => $grossTotal,
-                    'discount_amount' => $billDiscount,
-                    'discount_percentage' => $discountPercentage,
-                    'status' => 'pending',
-                    'notes' => "Service appointment booking discount request of {$discountPercentage}% (PKR {$billDiscount}) on total PKR {$grossTotal}.",
-                ]);
-            }
 
             // 2. Attach Appointment Services (with custom titles & custom prices)
             foreach ($processedLineItems as $item) {
@@ -379,12 +541,25 @@ class AppointmentController extends Controller
             ]);
 
             if ($paidAmount > 0) {
+                $receivingDesc = "Payment received for Service Booking #{$bookingNo}";
+                if ($paymentMode === 'Split' && is_array($splitPayments)) {
+                    $parts = [];
+                    foreach ($splitPayments as $m => $val) {
+                        if ($val > 0) $parts[] = "{$m}: PKR " . number_format($val, 2);
+                    }
+                    if (!empty($parts)) {
+                        $receivingDesc .= " (Split: " . implode(', ', $parts) . ")";
+                    }
+                } elseif (!empty($paymentMode)) {
+                    $receivingDesc .= " ({$paymentMode})";
+                }
+
                 AccountLedger::create([
                     'account_id' => $customer->id,
                     'date' => $appointmentDate,
                     'type' => 'receiving',
                     'reference_no' => $bookingNo . '-REC',
-                    'description' => "Payment received for Service Booking #{$bookingNo}",
+                    'description' => $receivingDesc,
                     'debit' => 0.00,
                     'credit' => $paidAmount,
                     'running_balance' => $newCustBalance,
@@ -394,13 +569,8 @@ class AppointmentController extends Controller
             $customer->update(['balance' => $newCustBalance]);
         });
 
-        $msg = 'Service appointment booked successfully!';
-        if ($requiresAdminApproval) {
-            $msg .= ' ⚠️ Note: Discount > 10% requires Admin Approval. A notification has been sent to Admin.';
-        }
-
         return redirect()->route('manager.appointments.index')
-            ->with($requiresAdminApproval ? 'warning' : 'success', $msg);
+            ->with('success', 'Service appointment booked successfully!');
     }
 
     /**
@@ -414,15 +584,14 @@ class AppointmentController extends Controller
             'appointment_date' => ['required', 'date'],
             'start_time' => ['nullable', 'string'],
             'status' => ['nullable', 'string', 'in:pending,confirmed,completed,cancelled'],
-            'ranking' => ['nullable', 'integer', 'min:1', 'max:5'],
-            'ranking_notes' => ['nullable', 'string', 'max:1000'],
             'discount_type' => ['nullable', 'string', 'in:fixed,percentage'],
             'discount' => ['nullable', 'numeric', 'min:0'],
             'discount_percentage' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'paid_amount' => ['required', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string', 'max:1000'],
             'receipt_image' => ['nullable', 'file', 'image', 'max:5120'],
-            'payment_mode' => ['nullable', 'string', 'in:Cash,Card,Bank,Other'],
+            'payment_mode' => ['nullable', 'string', 'in:Cash,Card,Bank,Other,Split'],
+            'split_payments' => ['nullable'],
             'extra_amount' => ['nullable', 'numeric', 'min:0'],
             'service_ids' => ['required', 'array', 'min:1'],
             'service_ids.*' => ['required', 'exists:services,id'],
@@ -430,20 +599,18 @@ class AppointmentController extends Controller
             'service_quantities.*' => ['nullable', 'numeric', 'min:1'],
             'service_custom_titles' => ['nullable', 'array'],
             'service_prices' => ['nullable', 'array'],
+            'service_discounts' => ['nullable', 'array'],
+            'service_discount_types' => ['nullable', 'array'],
             'admin_password' => ['nullable', 'string'],
         ]);
 
         $receiptPath = $appointment->receipt_image;
         if ($request->hasFile('receipt_image')) {
-            $file = $request->file('receipt_image');
-            $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-            $file->move(public_path('uploads/receipts'), $filename);
-            $receiptPath = 'uploads/receipts/' . $filename;
+            ImageUploadService::delete($appointment->receipt_image);
+            $receiptPath = ImageUploadService::upload($request->file('receipt_image'), 'receipts', 'receipt');
         }
 
-        $requiresAdminApproval = false;
-
-        DB::transaction(function () use ($validated, $appointment, $receiptPath, $request, &$requiresAdminApproval) {
+        DB::transaction(function () use ($validated, $appointment, $receiptPath, $request) {
             $bookingNo = $appointment->booking_no;
 
             // 1. Reverse old Customer Ledgers
@@ -454,6 +621,54 @@ class AppointmentController extends Controller
             if ($oldCustomer) {
                 $lastCustLedger = AccountLedger::where('account_id', $oldCustomer->id)->orderBy('id', 'desc')->first();
                 $oldCustomer->update(['balance' => $lastCustLedger ? $lastCustLedger->running_balance : 0.00]);
+            }
+
+            // 1. Verify Confirmed Booking Protection
+            // If booking is already confirmed, only Admin (or with Admin authorization) can remove services or decrease service quantities
+            $isConfirmed = ($appointment->status === 'confirmed');
+            $isAdmin = auth()->user()->hasRole('admin');
+            $adminAuthorized = false;
+
+            if ($request->filled('admin_password')) {
+                $adminPassword = $request->input('admin_password');
+                $adminUsers = \App\Models\User::whereHas('roles', function ($q) {
+                    $q->where('slug', 'admin')->orWhere('name', 'admin')->orWhere('name', 'Administrator');
+                })->get();
+                foreach ($adminUsers as $adminUser) {
+                    if (\Illuminate\Support\Facades\Hash::check($adminPassword, $adminUser->password)) {
+                        $adminAuthorized = true;
+                        break;
+                    }
+                }
+            }
+
+            if ($isConfirmed && !$isAdmin && !$adminAuthorized) {
+                $originalItems = $appointment->items()->get();
+                $incomingQuantities = [];
+                $serviceIds = $request->input('service_ids', []);
+                $serviceQuantities = $request->input('service_quantities', []);
+
+                foreach ($serviceIds as $idx => $sId) {
+                    $qty = (isset($serviceQuantities[$idx]) && is_numeric($serviceQuantities[$idx]) && (int)$serviceQuantities[$idx] > 0)
+                        ? (int)$serviceQuantities[$idx]
+                        : 1;
+                    $incomingQuantities[$sId] = ($incomingQuantities[$sId] ?? 0) + $qty;
+                }
+
+                foreach ($originalItems as $origItem) {
+                    $sId = $origItem->saloon_service_id;
+                    $origQty = (int) $origItem->quantity;
+                    $newQty = $incomingQuantities[$sId] ?? 0;
+
+                    if ($newQty < $origQty) {
+                        $serviceName = $origItem->service ? $origItem->service->title : 'Service #' . $sId;
+                        throw \Illuminate\Validation\ValidationException::withMessages([
+                            'service_ids' => [
+                                "The booking '{$appointment->booking_no}' is already Confirmed. Decreasing quantity or removing '{$serviceName}' requires Administrator authorization."
+                            ]
+                        ]);
+                    }
+                }
             }
 
             // Remove old line items
@@ -470,16 +685,38 @@ class AppointmentController extends Controller
             $appointmentDate = $validated['appointment_date'];
             $paidAmount = (float) $validated['paid_amount'];
             $paymentMode = $validated['payment_mode'] ?? 'Cash';
-            $extraAmount = in_array($paymentMode, ['Card', 'Bank']) ? (float) ($validated['extra_amount'] ?? 0) : 0.00;
+            $extraAmount = (in_array($paymentMode, ['Card', 'Bank']) || $paymentMode === 'Split') ? (float) ($validated['extra_amount'] ?? 0) : 0.00;
             $appointmentStatus = $validated['status'] ?? $appointment->status ?? 'confirmed';
 
-            // Calculate service totals, custom titles, and multi-quantities
+            // Process split payments breakdown if mode is Split
+            $splitPayments = null;
+            if ($paymentMode === 'Split') {
+                $rawSplits = $request->input('split_payments');
+                if (is_string($rawSplits)) {
+                    $splitPayments = json_decode($rawSplits, true);
+                } elseif (is_array($rawSplits)) {
+                    $splitPayments = $rawSplits;
+                }
+                if (is_array($splitPayments)) {
+                    $splitPayments = [
+                        'Cash' => max(0, (float)($splitPayments['Cash'] ?? 0)),
+                        'Card' => max(0, (float)($splitPayments['Card'] ?? 0)),
+                        'Bank' => max(0, (float)($splitPayments['Bank'] ?? 0)),
+                        'Other' => max(0, (float)($splitPayments['Other'] ?? 0)),
+                    ];
+                    $paidAmount = array_sum($splitPayments);
+                }
+            }
+
+            // Calculate service totals, custom titles, multi-quantities, and service-level discounts
             $serviceIds = $request->input('service_ids', []);
             $serviceQuantities = $request->input('service_quantities', []);
             $serviceCustomTitles = $request->input('service_custom_titles', []);
             $servicePrices = $request->input('service_prices', []);
+            $serviceDiscounts = $request->input('service_discounts', []);
+            $serviceDiscountTypes = $request->input('service_discount_types', []);
 
-            $services = SaloonService::whereIn('id', $serviceIds)->get()->keyBy('id');
+            $services = SaloonService::with('category')->whereIn('id', $serviceIds)->get()->keyBy('id');
             $grossTotal = 0;
             $processedLineItems = [];
 
@@ -492,12 +729,29 @@ class AppointmentController extends Controller
                     ? (int)$serviceQuantities[$index]
                     : 1;
 
-                // Custom Price if passed and valid
-                $unitPrice = (isset($servicePrices[$index]) && is_numeric($servicePrices[$index]))
+                // Base catalog price or custom price
+                $basePrice = (isset($servicePrices[$index]) && is_numeric($servicePrices[$index]))
                     ? max(0, (float)$servicePrices[$index])
-                    : (float)($srv->discounted_price ?: $srv->price ?: 0);
+                    : (float)($srv->price ?: $srv->discounted_price ?: 0);
 
-                $lineTotal = round($unitPrice * $qty, 2);
+                // Service-level discount
+                $rawDiscount = (isset($serviceDiscounts[$index]) && is_numeric($serviceDiscounts[$index]))
+                    ? max(0, (float)$serviceDiscounts[$index])
+                    : 0.00;
+
+                $discType = (isset($serviceDiscountTypes[$index]) && in_array($serviceDiscountTypes[$index], ['percentage', 'fixed']))
+                    ? $serviceDiscountTypes[$index]
+                    : 'percentage';
+
+                if ($discType === 'percentage') {
+                    $discPct = min(100, max(0, $rawDiscount));
+                    $itemDiscountPerUnit = round($basePrice * ($discPct / 100), 2);
+                } else {
+                    $itemDiscountPerUnit = min($basePrice, max(0, $rawDiscount));
+                }
+
+                $unitNetPrice = max(0, round($basePrice - $itemDiscountPerUnit, 2));
+                $lineTotal = round($unitNetPrice * $qty, 2);
 
                 // Custom Title if passed
                 $customTitle = isset($serviceCustomTitles[$index]) && trim($serviceCustomTitles[$index]) !== ''
@@ -510,32 +764,41 @@ class AppointmentController extends Controller
                     'saloon_service_id' => $srv->id,
                     'custom_title' => $customTitle,
                     'quantity' => $qty,
-                    'price' => $unitPrice,
-                    'discount' => 0.00,
+                    'price' => $basePrice,
+                    'discount' => round($itemDiscountPerUnit * $qty, 2),
                     'discounted_price' => $lineTotal,
                     'commission' => 0.00,
                 ];
             }
 
-            $discountType = $validated['discount_type'] ?? 'fixed';
-            $rawDiscountVal = (float) ($validated['discount'] ?? 0);
-            $rawDiscountPct = (float) ($validated['discount_percentage'] ?? 0);
+            // Customer Card Tier Discount Rules:
+            // 1. Silver Card: Fixed 5%
+            // 2. Gold Card: Fixed 15%
+            // 3. Platinum Card: Fixed 20%
+            // No Card: Normal flow (Permission allows any number, no permission allows max 10%)
+            $cardTypeLower = strtolower(trim($customer->card_type ?? ''));
+            $isCardFixed = false;
+            $cardFixedPct = null;
 
-            if ($discountType === 'percentage') {
-                $discountPercentage = min(100, max(0, $rawDiscountPct));
-                $billDiscount = round($grossTotal * ($discountPercentage / 100), 2);
-            } else {
-                $billDiscount = max(0, $rawDiscountVal);
-                $discountPercentage = ($grossTotal > 0) ? round(($billDiscount / $grossTotal) * 100, 2) : 0.00;
+            if (str_contains($cardTypeLower, 'silver')) {
+                $isCardFixed = true;
+                $cardFixedPct = 5.00;
+            } elseif (str_contains($cardTypeLower, 'gold')) {
+                $isCardFixed = true;
+                $cardFixedPct = 15.00;
+            } elseif (str_contains($cardTypeLower, 'platinum')) {
+                $isCardFixed = true;
+                $cardFixedPct = 20.00;
             }
 
             $isAdmin = auth()->user()->hasRole('admin');
-            $adminPassword = $request->input('admin_password');
+            $hasDiscountPermission = $isAdmin || auth()->user()->canGiveDiscount();
             $adminAuthorized = false;
 
-            if ($adminPassword) {
-                $adminUsers = \App\Models\User::whereHas('roles', function($q) {
-                    $q->where('name', 'admin');
+            if ($request->filled('admin_password')) {
+                $adminPassword = $request->input('admin_password');
+                $adminUsers = \App\Models\User::whereHas('roles', function ($q) {
+                    $q->where('slug', 'admin')->orWhere('name', 'admin')->orWhere('name', 'Administrator');
                 })->get();
                 foreach ($adminUsers as $adminUser) {
                     if (\Illuminate\Support\Facades\Hash::check($adminPassword, $adminUser->password)) {
@@ -545,21 +808,87 @@ class AppointmentController extends Controller
                 }
             }
 
-            $hasDiscountPermission = $isAdmin || auth()->user()->hasPermission('allow-bill-discount');
+            // Separate items into:
+            // 1. Non-discounted, non-addon items => eligible for bill discount
+            // 2. Add-On services => NEVER receive bill discount (even if not individually discounted)
+            // 3. Already-individually-discounted items => also not eligible for bill discount
+            $nonDiscountedTotal = 0.00;
+            $discountedTotal = 0.00;
+            $hasDiscountedItem = false;
+            foreach ($processedLineItems as $item) {
+                $srv = $services[$item['saloon_service_id']] ?? null;
+                $isItemDiscounted = false;
+                $isAddonService = $this->isAddOnService($srv);
+                if ($srv) {
+                    $origPrice = (float) ($srv->price ?? 0);
+                    $discPct = (float) ($srv->discount ?? 0);
+                    $discPrice = (float) ($srv->discounted_price ?? 0);
+                    $unitPrice = (float) ($item['price'] ?? 0);
+                    $itemDiscAmt = (float) ($item['discount'] ?? 0);
+                    if ($itemDiscAmt > 0 || $discPct > 0 || ($discPrice > 0 && $discPrice < $origPrice) || ($origPrice > 0 && $unitPrice < $origPrice)) {
+                        $isItemDiscounted = true;
+                    }
+                }
 
-            if ($discountPercentage <= 10.00) {
-                // Up to 10% discount: Allowed for every user unconditionally
+                if ($isItemDiscounted || $isAddonService) {
+                    // Add-ons and individually-discounted items are NOT eligible for bill discount
+                    $hasDiscountedItem = $hasDiscountedItem || $isItemDiscounted;
+                    $discountedTotal += (float) $item['discounted_price'];
+                } else {
+                    $nonDiscountedTotal += (float) $item['discounted_price'];
+                }
+            }
+
+            // The discount base is ONLY the sum of non-discounted items
+            $eligibleDiscountBase = $nonDiscountedTotal;
+
+            if ($eligibleDiscountBase <= 0) {
+                // All items in cart are already discounted: no bill or card discount allowed
+                $discountType = 'percentage';
+                $discountPercentage = 0.00;
+                $billDiscount = 0.00;
+                $discountStatus = 'approved';
+                $discountApprovedBy = auth()->id();
+            } elseif ($isCardFixed) {
+                // Fixed cardholder discount: applies ONLY to the sum of non-discounted items
+                $discountType = 'percentage';
+                $discountPercentage = $cardFixedPct;
+                $billDiscount = round(($eligibleDiscountBase * $discountPercentage) / 100, 2);
                 $discountStatus = 'approved';
                 $discountApprovedBy = auth()->id();
             } else {
-                // Greater than 10%: Allowed only for users with allow-bill-discount permission or admin (or authorized via admin password)
-                if ($hasDiscountPermission || $adminAuthorized) {
+                // Normal flow: No Card - discount applies ONLY to the sum of non-discounted items
+                $discountType = $validated['discount_type'] ?? 'fixed';
+                $rawDiscountVal = (float) ($validated['discount'] ?? 0);
+                $rawDiscountPct = (float) ($validated['discount_percentage'] ?? 0);
+
+                if ($discountType === 'percentage') {
+                    $discountPercentage = min(100, max(0, $rawDiscountPct));
+                    $billDiscount = round(($eligibleDiscountBase * $discountPercentage) / 100, 2);
+                } else {
+                    $billDiscount = min($eligibleDiscountBase, max(0, $rawDiscountVal));
+                    $discountPercentage = $eligibleDiscountBase > 0 ? round(($billDiscount / $eligibleDiscountBase) * 100, 2) : 0.00;
+                }
+
+                if ($billDiscount > 0) {
+                    if ($hasDiscountPermission || $isAdmin) {
+                        // User has permission: can allow at any number
+                        $discountStatus = 'approved';
+                        $discountApprovedBy = auth()->id();
+                    } else {
+                        // Not allowed permission: just only for 10% and less
+                        if ($discountPercentage <= 10.00 || $adminAuthorized) {
+                            $discountStatus = 'approved';
+                            $discountApprovedBy = auth()->id();
+                        } else {
+                            throw \Illuminate\Validation\ValidationException::withMessages([
+                                'discount' => ["A discount of {$discountPercentage}% exceeds your allowed limit of 10%. Administrator authorization password is required."]
+                            ]);
+                        }
+                    }
+                } else {
                     $discountStatus = 'approved';
                     $discountApprovedBy = auth()->id();
-                } else {
-                    $discountStatus = 'pending_approval';
-                    $requiresAdminApproval = true;
-                    $discountApprovedBy = null;
                 }
             }
 
@@ -591,20 +920,9 @@ class AppointmentController extends Controller
                 'notes' => $validated['notes'] ?? null,
                 'receipt_image' => $receiptPath,
                 'payment_mode' => $paymentMode,
+                'split_payments' => $splitPayments,
                 'extra_amount' => $extraAmount,
             ]);
-
-            if ($discountPercentage > 10.00 && !$hasDiscountPermission && !$adminAuthorized) {
-                \App\Models\DiscountRequest::create([
-                    'appointment_id' => $appointment->id,
-                    'requested_by_user_id' => auth()->id(),
-                    'gross_amount' => $grossTotal,
-                    'discount_amount' => $billDiscount,
-                    'discount_percentage' => $discountPercentage,
-                    'status' => 'pending',
-                    'notes' => "Service appointment booking discount edit request of {$discountPercentage}% (PKR {$billDiscount}) on total PKR {$grossTotal}.",
-                ]);
-            }
 
             // 4. Create new line items
             foreach ($processedLineItems as $item) {
@@ -628,12 +946,25 @@ class AppointmentController extends Controller
             ]);
 
             if ($paidAmount > 0) {
+                $receivingDesc = "Payment received for Service Booking #{$bookingNo}";
+                if ($paymentMode === 'Split' && is_array($splitPayments)) {
+                    $parts = [];
+                    foreach ($splitPayments as $m => $val) {
+                        if ($val > 0) $parts[] = "{$m}: PKR " . number_format($val, 2);
+                    }
+                    if (!empty($parts)) {
+                        $receivingDesc .= " (Split: " . implode(', ', $parts) . ")";
+                    }
+                } elseif (!empty($paymentMode)) {
+                    $receivingDesc .= " ({$paymentMode})";
+                }
+
                 AccountLedger::create([
                     'account_id' => $customer->id,
                     'date' => $appointmentDate,
                     'type' => 'receiving',
                     'reference_no' => $bookingNo . '-REC',
-                    'description' => "Payment received for Service Booking #{$bookingNo}",
+                    'description' => $receivingDesc,
                     'debit' => 0.00,
                     'credit' => $paidAmount,
                     'running_balance' => $newCustBalance,
@@ -643,13 +974,8 @@ class AppointmentController extends Controller
             $customer->update(['balance' => $newCustBalance]);
         });
 
-        $msg = "Service appointment #{$appointment->booking_no} updated successfully!";
-        if ($requiresAdminApproval) {
-            $msg .= ' ⚠️ Note: Updated discount > 10% requires Admin Approval.';
-        }
-
         return redirect()->route('manager.appointments.index')
-            ->with($requiresAdminApproval ? 'warning' : 'success', $msg);
+            ->with('success', "Service appointment #{$appointment->booking_no} updated successfully!");
     }
 
     /**
@@ -676,6 +1002,29 @@ class AppointmentController extends Controller
     }
 
     /**
+     * Verify administrator password via AJAX.
+     */
+    public function verifyAdminPassword(Request $request)
+    {
+        $password = $request->input('password');
+        if (empty($password)) {
+            return response()->json(['valid' => false, 'message' => 'Password is required.'], 422);
+        }
+
+        $adminUsers = \App\Models\User::whereHas('roles', function ($q) {
+            $q->where('slug', 'admin')->orWhere('name', 'admin')->orWhere('name', 'Administrator');
+        })->get();
+
+        foreach ($adminUsers as $adminUser) {
+            if (\Illuminate\Support\Facades\Hash::check($password, $adminUser->password)) {
+                return response()->json(['valid' => true]);
+            }
+        }
+
+        return response()->json(['valid' => false, 'message' => 'Incorrect administrator password.'], 403);
+    }
+
+    /**
      * Update appointment booking status.
      */
     public function updateStatus(Request $request, Appointment $appointment)
@@ -688,5 +1037,56 @@ class AppointmentController extends Controller
 
         return redirect()->route('manager.appointments.index')
             ->with('success', "Appointment #{$appointment->booking_no} status updated to " . ucfirst($validated['status']) . "!");
+    }
+
+    /**
+     * Upload or replace customer payment proof / slip for an appointment.
+     */
+    public function uploadReceipt(Request $request, Appointment $appointment)
+    {
+        $request->validate([
+            'receipt_image' => ['required', 'file', 'mimes:jpeg,png,jpg,webp,pdf', 'max:10240'],
+        ]);
+
+        if ($request->hasFile('receipt_image')) {
+            if (!empty($appointment->receipt_image) && !str_starts_with($appointment->receipt_image, 'http')) {
+                ImageUploadService::delete($appointment->receipt_image);
+            }
+            $receiptPath = ImageUploadService::upload($request->file('receipt_image'), 'receipts', 'receipt');
+            $appointment->update(['receipt_image' => $receiptPath]);
+        }
+
+        if ($request->wantsJson() || $request->ajax()) {
+            return response()->json([
+                'success' => true,
+                'message' => "Payment proof slip updated successfully for #{$appointment->booking_no}",
+                'receipt_url' => asset($appointment->receipt_image),
+            ]);
+        }
+
+        return redirect()->back()
+            ->with('success', "Payment proof slip updated successfully for #{$appointment->booking_no}!");
+    }
+
+    /**
+     * Detect if a SaloonService is an Add-On service by its title or category name.
+     * Add-On services are NEVER eligible for bill-level discounts.
+     * Mirrors the JS isAddOn() detection in the appointments view.
+     */
+    private function isAddOnService(?\App\Models\SaloonService $srv): bool
+    {
+        if (!$srv) return false;
+
+        $catTitle = strtolower(trim($srv->category->title ?? ''));
+        $srvTitle = strtolower(trim($srv->title ?? ''));
+
+        $addonKeywords = ['ad on', 'add on', 'adon', 'addon'];
+        foreach ($addonKeywords as $kw) {
+            if (str_contains($catTitle, $kw) || str_contains($srvTitle, $kw)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

@@ -39,6 +39,9 @@ class ExpenseController extends Controller
             $query->whereDate('created_at', '<=', $dateTo);
         }
 
+        // Fetch All Filtered Expenses (Datewise Ascending for Report Printing)
+        $allExpenses = (clone $query)->orderBy('created_at', 'asc')->get();
+
         // Pagination
         $expenses = (clone $query)->orderBy('created_at', 'desc')->paginate(12)->withQueryString();
 
@@ -61,9 +64,11 @@ class ExpenseController extends Controller
         $topCategory = $categoryBreakdown->first();
 
         $categories = ExpenseCategory::orderBy('title')->get();
+        $appSetting = \App\Models\Setting::first();
 
         return view('manager.expenses.index', compact(
             'expenses',
+            'allExpenses',
             'categories',
             'search',
             'categoryId',
@@ -73,7 +78,8 @@ class ExpenseController extends Controller
             'totalExpensesCount',
             'thisMonthTotal',
             'categoryBreakdown',
-            'topCategory'
+            'topCategory',
+            'appSetting'
         ));
     }
 

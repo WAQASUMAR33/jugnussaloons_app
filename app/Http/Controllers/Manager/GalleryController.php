@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Gallery;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use App\Services\ImageUploadService;
 
 class GalleryController extends Controller
 {
@@ -87,15 +88,14 @@ class GalleryController extends Controller
             $originalName = $file->getClientOriginalName();
             $fileSize = $file->getSize();
 
-            $fileName = 'gallery_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-            $path = $file->storeAs('galleries', $fileName, 'public');
+            $imagePath = ImageUploadService::upload($file, 'galleries', 'gallery');
 
             $title = $baseTitle ?: pathinfo($originalName, PATHINFO_FILENAME);
 
             Gallery::create([
                 'title' => $title,
                 'category' => $category,
-                'image_path' => 'storage/' . $path,
+                'image_path' => $imagePath,
                 'file_name' => $originalName,
                 'file_size' => $fileSize,
                 'is_active' => true,
@@ -194,6 +194,48 @@ class GalleryController extends Controller
     }
 
     /**
+     * Delete all gallery photos and their physical files.
+     */
+    public function deleteAll(Request $request)
+    {
+        $galleries = Gallery::all();
+        $count = $galleries->count();
+
+        foreach ($galleries as $gallery) {
+            $this->deletePhysicalFile($gallery->image_path);
+            $gallery->delete();
+        }
+
+        // Clean up any remaining files in storage and public galleries directories
+        $directories = [
+            storage_path('app/public/galleries'),
+            public_path('storage/galleries'),
+        ];
+
+        foreach ($directories as $dir) {
+            if (\Illuminate\Support\Facades\File::isDirectory($dir)) {
+                $files = \Illuminate\Support\Facades\File::files($dir);
+                foreach ($files as $file) {
+                    if ($file->getFilename() !== '.gitignore') {
+                        @\Illuminate\Support\Facades\File::delete($file->getPathname());
+                    }
+                }
+            }
+        }
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => "All {$count} photo(s) deleted successfully.",
+            ]);
+        }
+
+        return redirect()->route('manager.galleries.index')
+            ->with('success', "All {$count} gallery photo(s) have been deleted successfully!");
+    }
+
+
+    /**
      * Delete physical file from storage or public path.
      */
     protected function deletePhysicalFile(?string $relativePath): void
@@ -202,19 +244,7 @@ class GalleryController extends Controller
             return;
         }
 
-        // Check public_path directly
-        $fullPublicPath = public_path($relativePath);
-        if (file_exists($fullPublicPath) && is_file($fullPublicPath)) {
-            @unlink($fullPublicPath);
-        }
-
-        // Also attempt storage disk public deletion if path starts with storage/
-        if (str_starts_with($relativePath, 'storage/')) {
-            $storagePath = substr($relativePath, 8); // remove 'storage/'
-            if (Storage::disk('public')->exists($storagePath)) {
-                Storage::disk('public')->delete($storagePath);
-            }
-        }
+        ImageUploadService::delete($relativePath);
     }
 
     /**

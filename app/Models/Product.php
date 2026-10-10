@@ -10,8 +10,10 @@ class Product extends Model
     use HasFactory;
 
     protected $fillable = [
+        'product_category_id',
         'title',
         'price',
+        'purchase_price',
         'discount',
         'discounted_price',
         'stock',
@@ -21,11 +23,95 @@ class Product extends Model
 
     protected $casts = [
         'price' => 'decimal:2',
+        'purchase_price' => 'decimal:2',
         'discount' => 'decimal:2',
         'discounted_price' => 'decimal:2',
         'stock' => 'integer',
         'low_stock' => 'integer',
     ];
+
+    protected $appends = [
+        'image_url',
+        'sale_price',
+        'purchase_price',
+    ];
+
+    /**
+     * Purchase items relationship to determine purchase history and latest cost rate.
+     */
+    public function purchaseItems(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(PurchaseItem::class, 'product_id');
+    }
+
+    /**
+     * Get purchase rate / cost price of the product (stored purchase_price, latest purchase unit price, or regular price).
+     */
+    public function getPurchasePriceAttribute(): float
+    {
+        if (isset($this->attributes['purchase_price']) && (float)$this->attributes['purchase_price'] > 0) {
+            return (float)$this->attributes['purchase_price'];
+        }
+
+        if ($this->relationLoaded('purchaseItems')) {
+            $latest = $this->purchaseItems->sortByDesc('id')->first();
+            if ($latest && (float)$latest->unit_price > 0) {
+                return (float)$latest->unit_price;
+            }
+        } else {
+            $latest = PurchaseItem::where('product_id', $this->id)->latest('id')->first();
+            if ($latest && (float)$latest->unit_price > 0) {
+                return (float)$latest->unit_price;
+            }
+        }
+
+        return (float) ($this->price ?? 0);
+    }
+
+    /**
+     * Get computed discounted sales price (if product has a discount).
+     */
+    public function getSalePriceAttribute(): float
+    {
+        $price = (float) ($this->price ?? 0);
+        $discountPct = (float) ($this->discount ?? 0);
+        $discountedPrice = (float) ($this->discounted_price ?? 0);
+
+        if ($discountedPrice > 0 && $discountedPrice < $price) {
+            return $discountedPrice;
+        }
+        if ($discountPct > 0 && $discountPct <= 100) {
+            return round($price - ($price * ($discountPct / 100)), 2);
+        }
+        if ($discountedPrice > 0) {
+            return $discountedPrice;
+        }
+        return $price;
+    }
+
+    /**
+     * Get accessible public URL for product image.
+     */
+    public function getImageUrlAttribute(): ?string
+    {
+        if (empty($this->image)) {
+            return null;
+        }
+
+        if (str_starts_with($this->image, 'http://') || str_starts_with($this->image, 'https://')) {
+            return $this->image;
+        }
+
+        return asset(ltrim($this->image, '/'));
+    }
+
+    /**
+     * Category relationship.
+     */
+    public function category(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(ProductCategory::class, 'product_category_id');
+    }
 
     /**
      * Store stocks relationship.

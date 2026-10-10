@@ -8,6 +8,7 @@ use App\Models\AccountLedger;
 use App\Models\Product;
 use App\Models\Purchase;
 use App\Models\PurchaseItem;
+use App\Models\Setting;
 use App\Models\Store;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -22,7 +23,7 @@ class PurchaseController extends Controller
         $search = $request->input('search');
         $storeId = $request->input('store_id');
 
-        $query = Purchase::with(['supplier', 'store', 'items.product']);
+        $query = Purchase::with(['supplier.category', 'store', 'items.product.category']);
 
         if ($search) {
             $query->where('invoice_no', 'like', "%{$search}%")
@@ -46,8 +47,20 @@ class PurchaseController extends Controller
         $products = Product::with('storeStocks')->orderBy('title')->get();
         $stores = Store::where('is_active', true)->orderBy('is_default', 'desc')->orderBy('name')->get();
         $defaultStore = Store::getDefaultStore();
+        $appSetting = Setting::first();
 
-        return view('manager.purchases.index', compact('purchases', 'suppliers', 'products', 'stores', 'defaultStore', 'search', 'storeId'));
+        return view('manager.purchases.index', compact('purchases', 'suppliers', 'products', 'stores', 'defaultStore', 'search', 'storeId', 'appSetting'));
+    }
+
+    /**
+     * Display a printable official purchase bill / report.
+     */
+    public function print(Purchase $purchase)
+    {
+        $purchase->load(['supplier.category', 'store', 'items.product.category']);
+        $appSetting = Setting::first();
+
+        return view('manager.purchases.print', compact('purchase', 'appSetting'));
     }
 
     /**
@@ -111,13 +124,14 @@ class PurchaseController extends Controller
                 // Increment Product Stock for Destination Store & Sync Total
                 $product = Product::findOrFail($itemData['product_id']);
                 $product->incrementStoreStock($storeId, (int) $itemData['quantity']);
+                $product->purchase_price = (float) $itemData['unit_price'];
 
                 if (isset($itemData['sale_price']) && (float) $itemData['sale_price'] > 0) {
                     $newSaleRate = (float) $itemData['sale_price'];
                     $product->price = $newSaleRate;
                     $product->discounted_price = $product->calculateDiscountedPrice();
-                    $product->save();
                 }
+                $product->save();
             }
 
             // 3. Write Purchase Ledger Entry (Debit/Credit)

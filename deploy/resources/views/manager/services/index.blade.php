@@ -11,11 +11,26 @@
         if (!price || price <= 0) return 0;
         if (!discount || discount <= 0) return price;
         return (price - (price * (discount / 100))).toFixed(2);
+    },
+    openEditModal(service) {
+        this.editService = {
+            id: service.id,
+            service_category_id: (service.service_category_id !== null && service.service_category_id !== undefined && service.service_category_id !== '') ? String(service.service_category_id) : '',
+            title: service.title || '',
+            description: service.description || '',
+            price: Number(service.price) || 0,
+            discount: Number(service.discount) || 0,
+            discounted_price: Number(service.discounted_price) || 0,
+            junior_commission: Number(service.junior_commission ?? 0),
+            senior_commission: Number(service.senior_commission ?? 0),
+            image: service.image || ''
+        };
+        this.editModalOpen = true;
     }
 }" class="space-y-6">
 
     <!-- Header & Action Bar -->
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 border border-slate-200 shadow-sm">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-4 sm:p-6 border border-slate-200 shadow-sm">
         <div class="flex items-center gap-3">
             <div class="p-2.5 bg-indigo-50 text-indigo-600">
                 <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.121 14.121L19 19m-7-7l7-7m-7 7l-2.879 2.879M12 12L9.121 9.121m0 0A3 3 0 104.5 4.5a3 3 0 004.621 4.621zm0 0L12 12m-2.879 2.879a3 3 0 10-4.243 4.243 3 3 0 004.243-4.243z"></path></svg>
@@ -27,7 +42,7 @@
         </div>
 
         <button @click="createModalOpen = true" 
-                class="inline-flex items-center gap-2 px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-all">
+                class="inline-flex items-center justify-center gap-2 px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-all w-full sm:w-auto">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
             <span>Add New Service</span>
         </button>
@@ -88,6 +103,20 @@
                 </thead>
                 <tbody class="divide-y divide-slate-100 text-sm">
                     @forelse($services as $service)
+                    @php
+                        $servicePayload = [
+                            'id' => $service->id,
+                            'service_category_id' => $service->service_category_id ? (string) $service->service_category_id : '',
+                            'title' => (string) $service->title,
+                            'description' => (string) ($service->description ?? ''),
+                            'price' => (float) $service->price,
+                            'discount' => (float) $service->discount,
+                            'discounted_price' => (float) $service->discounted_price,
+                            'junior_commission' => (float) ($service->junior_commission ?? $service->commission ?? 0),
+                            'senior_commission' => (float) ($service->senior_commission ?? 0),
+                            'image' => $service->image ? asset($service->image) : '',
+                        ];
+                    @endphp
                     <tr class="hover:bg-slate-50/60 transition-colors">
                         <td class="py-4 px-6 font-bold text-xs text-slate-400">#{{ $service->id }}</td>
                         <td class="py-4 px-6">
@@ -131,23 +160,13 @@
                         </td>
                         <td class="py-4 px-6 text-right">
                             <div class="flex items-center justify-end gap-2">
-                                <button @click="editService = { 
-                                            id: {{ $service->id }}, 
-                                            service_category_id: {{ $service->service_category_id ?? 'null' }}, 
-                                            title: '{{ addslashes($service->title) }}', 
-                                            description: '{{ addslashes($service->description) }}', 
-                                            price: {{ $service->price }}, 
-                                            discount: {{ $service->discount }}, 
-                                            discounted_price: {{ $service->discounted_price }}, 
-                                            junior_commission: {{ $service->junior_commission ?? $service->commission ?? 0 }}, 
-                                            senior_commission: {{ $service->senior_commission ?? 0 }}, 
-                                            image: '{{ $service->image ? asset($service->image) : '' }}' 
-                                        }; editModalOpen = true" 
+                                <button type="button" 
+                                        @click="openEditModal({{ Js::from($servicePayload) }})" 
                                         class="p-2 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 transition-colors" title="Edit Service">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
                                 </button>
 
-                                <form method="POST" action="{{ route('manager.services.destroy', $service) }}" onsubmit="return confirm('Delete service {{ addslashes($service->title) }}?');" class="inline">
+                                <form method="POST" action="{{ route('manager.services.destroy', $service) }}" onsubmit="return confirm({{ Js::from('Delete service ' . $service->title . '?') }});" class="inline">
                                     @csrf
                                     @method('DELETE')
                                     <button type="submit" class="p-2 text-slate-600 hover:text-red-600 hover:bg-red-50 transition-colors" title="Delete Service">
@@ -228,7 +247,7 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-3 gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
                     <div>
                         <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Discounted Price</label>
                         <input type="number" step="0.01" min="0" name="discounted_price" :value="calculateDiscount(newPrice, newDiscount)" 
@@ -304,7 +323,7 @@
 
                 <div>
                     <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Description</label>
-                    <textarea name="description" rows="3" x-model="editService.description" 
+                    <textarea name="description" rows="4" x-model="editService.description" placeholder="Service overview and included treatments..." 
                               class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-600"></textarea>
                 </div>
 
@@ -322,7 +341,7 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-3 gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
                     <div>
                         <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Discounted Price</label>
                         <input type="number" step="0.01" min="0" name="discounted_price" :value="calculateDiscount(editService.price, editService.discount)" 

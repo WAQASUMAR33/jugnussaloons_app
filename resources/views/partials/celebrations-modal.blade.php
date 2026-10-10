@@ -102,8 +102,8 @@
                             @foreach($todayBirthdays as $user)
                                 @php
                                     $cleanPhone = preg_replace('/[^0-9]/', '', $user->phone_no1);
-                                    $age = $user->date_of_birth ? now()->year - $user->date_of_birth->year : null;
-                                    $bdayMsg = rawurlencode("Happy Birthday " . $user->name . "! 🎉 Wishing you a wonderful day from the team at Jugnu Saloon. Visit us today to enjoy special celebration discounts!");
+                                    $age = $user->turning_age ?: ($user->date_of_birth ? now()->year - $user->date_of_birth->year : null);
+                                    $bdayUrl = $user->birthday_whatsapp_url ?? ($cleanPhone ? "https://wa.me/{$cleanPhone}?text=" . rawurlencode("Happy Birthday {$user->name}! 🎂 Wishing you a wonderful day from Jugnu Saloon.") : '#');
                                 @endphp
                                 <div class="p-3 bg-white border border-slate-200 rounded-none flex items-center justify-between gap-3 hover:bg-slate-50/70 transition-colors">
                                     <div class="flex items-center gap-3">
@@ -131,11 +131,11 @@
                                         </div>
                                     </div>
 
-                                    <!-- Action: Only WhatsApp -->
+                                    <!-- Action: WhatsApp Birthday Wish -->
                                     @if($cleanPhone)
-                                        <a href="https://wa.me/{{ $cleanPhone }}?text={{ $bdayMsg }}" target="_blank" 
+                                        <a href="{{ $bdayUrl }}" target="_blank" 
                                            class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-none transition-colors flex items-center gap-1 shrink-0">
-                                            <span>💬 WhatsApp</span>
+                                            <span>💬 Birthday Wish</span>
                                         </a>
                                     @endif
                                 </div>
@@ -154,8 +154,8 @@
                             @foreach($todayAnniversaries as $user)
                                 @php
                                     $cleanPhone = preg_replace('/[^0-9]/', '', $user->phone_no1);
-                                    $years = $user->date_of_anniversary ? now()->year - $user->date_of_anniversary->year : null;
-                                    $annivMsg = rawurlencode("Happy Wedding Anniversary " . $user->name . "! 💍 Wishing you both endless joy and love from Jugnu Saloon. Celebrate your special day with our luxury pampering packages!");
+                                    $years = $user->anniversary_years ?: ($user->date_of_anniversary ? now()->year - $user->date_of_anniversary->year : null);
+                                    $annivUrl = $user->anniversary_whatsapp_url ?? ($cleanPhone ? "https://wa.me/{$cleanPhone}?text=" . rawurlencode("Happy Marriage Anniversary {$user->name}! 💍 Wishing you both endless happiness from Jugnu Saloon.") : '#');
                                 @endphp
                                 <div class="p-3 bg-white border border-slate-200 rounded-none flex items-center justify-between gap-3 hover:bg-slate-50/70 transition-colors">
                                     <div class="flex items-center gap-3">
@@ -166,7 +166,7 @@
                                             <div class="flex items-center gap-2">
                                                 <h4 class="text-xs font-black text-slate-900">{{ $user->name }}</h4>
                                                 <span class="px-1.5 py-0.2 bg-rose-50 text-rose-800 border border-rose-200 text-[10px] font-bold">
-                                                    Anniversary
+                                                    Marriage Ceremony
                                                 </span>
                                                 @if($user->category)
                                                     <span class="px-1.5 py-0.2 bg-slate-100 text-slate-600 text-[10px] font-medium border border-slate-200">
@@ -183,11 +183,11 @@
                                         </div>
                                     </div>
 
-                                    <!-- Action: Only WhatsApp -->
+                                    <!-- Action: WhatsApp Marriage Ceremony Wish -->
                                     @if($cleanPhone)
-                                        <a href="https://wa.me/{{ $cleanPhone }}?text={{ $annivMsg }}" target="_blank" 
+                                        <a href="{{ $annivUrl }}" target="_blank" 
                                            class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-none transition-colors flex items-center gap-1 shrink-0">
-                                            <span>💬 WhatsApp</span>
+                                            <span>💬 Marriage Wish</span>
                                         </a>
                                     @endif
                                 </div>

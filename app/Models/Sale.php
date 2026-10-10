@@ -22,6 +22,7 @@ class Sale extends Model
         'sale_date',
         'notes',
         'payment_mode',
+        'split_payments',
         'extra_amount',
     ];
 
@@ -32,6 +33,7 @@ class Sale extends Model
         'received_amount' => 'decimal:2',
         'balance_due' => 'decimal:2',
         'extra_amount' => 'decimal:2',
+        'split_payments' => 'array',
     ];
 
     /**

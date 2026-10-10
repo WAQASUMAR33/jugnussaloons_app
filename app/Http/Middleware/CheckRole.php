@@ -32,11 +32,11 @@ class CheckRole
             return $next($request);
         }
 
-        // 3. If checking for manager/admin and user has direct permissions, allow entry
-        if ((in_array('manager', $roles) || in_array('admin', $roles)) && ($user->permissions()->exists() || $user->roles()->exists())) {
+        // 3. For manager prefix, allow any salon staff role (manager, accountant, sales-person, receptionist, staff) or user with assigned permissions
+        if (in_array('manager', $roles) && ($user->hasAnyRole(['manager', 'accountant', 'sales-person', 'receptionist', 'staff']) || ($user->relationLoaded('permissions') ? $user->permissions->isNotEmpty() : $user->permissions()->exists()))) {
             return $next($request);
         }
 
-        abort(403, 'Unauthorized access: You do not have permission to view this page.');
+        abort(403, 'Unauthorized access: You do not have the required role to view this page.');
     }
 }

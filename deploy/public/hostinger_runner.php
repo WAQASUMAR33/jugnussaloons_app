@@ -1,6 +1,6 @@
 <?php
 /**
- * Hostinger Web Artisan & Storage Symlink Runner
+ * Hostinger Web Artisan, Image Sync & Storage Symlink Runner
  * Jugnu Saloon & Spa Web Application
  */
 
@@ -31,37 +31,114 @@ $action = $_GET['action'] ?? null;
 $outputLog = [];
 $statusType = 'info';
 
+$subfolders = ['products', 'services', 'categories', 'branding', 'galleries', 'receipts'];
+
+// Helper function to sync files from storage/app/public to public/storage
+function syncPublicStorageDirs($subfolders, &$outputLog) {
+    $storageBase = storage_path('app/public');
+    $publicBase  = public_path('storage');
+    $copiedCount = 0;
+
+    // Ensure base dirs exist
+    if (!file_exists($storageBase)) {
+        @mkdir($storageBase, 0775, true);
+    }
+    if (!file_exists($publicBase)) {
+        @mkdir($publicBase, 0775, true);
+    }
+
+    foreach ($subfolders as $sub) {
+        $srcDir = $storageBase . '/' . $sub;
+        $dstDir = $publicBase . '/' . $sub;
+
+        if (!file_exists($srcDir)) {
+            @mkdir($srcDir, 0775, true);
+        }
+        if (!file_exists($dstDir)) {
+            @mkdir($dstDir, 0775, true);
+        }
+
+        // Copy files from storage to public if not already there
+        if (is_dir($srcDir)) {
+            $files = @scandir($srcDir) ?: [];
+            foreach ($files as $f) {
+                if ($f === '.' || $f === '..') continue;
+                $srcFile = $srcDir . '/' . $f;
+                $dstFile = $dstDir . '/' . $f;
+                if (is_file($srcFile) && !file_exists($dstFile)) {
+                    if (@copy($srcFile, $dstFile)) {
+                        $copiedCount++;
+                    }
+                }
+            }
+        }
+
+        // Also copy from public to storage if missing
+        if (is_dir($dstDir)) {
+            $files = @scandir($dstDir) ?: [];
+            foreach ($files as $f) {
+                if ($f === '.' || $f === '..') continue;
+                $dstFile = $dstDir . '/' . $f;
+                $srcFile = $srcDir . '/' . $f;
+                if (is_file($dstFile) && !file_exists($srcFile)) {
+                    @copy($dstFile, $srcFile);
+                }
+            }
+        }
+    }
+
+    $outputLog[] = "📁 Verified/created storage directories: <code>" . implode(', ', $subfolders) . "</code>";
+    if ($copiedCount > 0) {
+        $outputLog[] = "🖼️ Synchronized <strong>{$copiedCount}</strong> image file(s) between <code>storage/app/public</code> and <code>public/storage</code>.";
+    } else {
+        $outputLog[] = "ℹ️ Storage directories are in sync.";
+    }
+}
+
 if ($action) {
     switch ($action) {
         case 'storage_link':
             $target = storage_path('app/public');
             $shortcut = public_path('storage');
 
-            if (file_exists($shortcut)) {
-                $outputLog[] = "ℹ️ Storage link already exists at: <code>{$shortcut}</code>";
-            } else {
+            // 1. If shortcut is a broken link, remove it first
+            if (is_link($shortcut)) {
+                $currentTarget = @readlink($shortcut);
+                if (!$currentTarget || !file_exists($shortcut)) {
+                    $outputLog[] = "⚠️ Removing broken symlink at <code>{$shortcut}</code> (was pointing to: {$currentTarget}).";
+                    @unlink($shortcut);
+                }
+            }
+
+            // 2. Try creating symlink or fall back to directory mirroring
+            $symlinkCreated = false;
+            if (!file_exists($shortcut)) {
                 try {
                     if (function_exists('symlink') && @symlink($target, $shortcut)) {
                         $outputLog[] = "✅ Symbolic link created successfully: <code>public/storage</code> -> <code>storage/app/public</code>";
                         $statusType = 'success';
+                        $symlinkCreated = true;
                     } else {
                         Artisan::call('storage:link');
                         $outputLog[] = "✅ Artisan storage:link output: " . Artisan::output();
                         $statusType = 'success';
+                        $symlinkCreated = file_exists($shortcut);
                     }
-                } catch (\Exception $e) {
+                } catch (\Throwable $e) {
                     $outputLog[] = "⚠️ Symlink creation warning: " . $e->getMessage();
-                    // Fallback to Artisan
-                    try {
-                        Artisan::call('storage:link');
-                        $outputLog[] = "✅ Artisan storage:link fallback output: " . Artisan::output();
-                        $statusType = 'success';
-                    } catch (\Exception $ex) {
-                        $outputLog[] = "❌ Error linking storage: " . $ex->getMessage();
-                        $statusType = 'danger';
-                    }
                 }
+            } else {
+                $outputLog[] = "ℹ️ <code>public/storage</code> already exists (Type: " . (is_link($shortcut) ? 'Symbolic Link' : 'Real Directory') . ").";
             }
+
+            // 3. Always ensure dual-directory sync exists
+            syncPublicStorageDirs($subfolders, $outputLog);
+            $statusType = 'success';
+            break;
+
+        case 'sync_images':
+            syncPublicStorageDirs($subfolders, $outputLog);
+            $statusType = 'success';
             break;
 
         case 'migrate':
@@ -95,20 +172,22 @@ if ($action) {
             break;
 
         case 'all':
-            // 1. Storage Link
+            // 1. Storage & Image Sync
             $target = storage_path('app/public');
             $shortcut = public_path('storage');
-            if (file_exists($shortcut)) {
-                $outputLog[] = "ℹ️ Storage link already exists.";
-            } else {
-                try {
+            if (is_link($shortcut) && (!@readlink($shortcut) || !file_exists($shortcut))) {
+                @unlink($shortcut);
+            }
+            if (!file_exists($shortcut)) {
+                if (function_exists('symlink')) {
                     @symlink($target, $shortcut);
-                    $outputLog[] = "✅ Storage link created!";
-                } catch (\Exception $e) {
-                    Artisan::call('storage:link');
-                    $outputLog[] = "✅ Storage link created via Artisan!";
+                }
+                if (!file_exists($shortcut)) {
+                    try { Artisan::call('storage:link'); } catch (\Throwable $e) {}
                 }
             }
+            syncPublicStorageDirs($subfolders, $outputLog);
+            $outputLog[] = "✅ Storage folders initialized and synchronized!";
 
             // 2. Migrate
             try {
@@ -134,6 +213,14 @@ if ($action) {
             break;
     }
 }
+
+// Check Diagnostics
+$uploadMax = ini_get('upload_max_filesize');
+$postMax   = ini_get('post_max_size');
+$memory    = ini_get('memory_limit');
+$storageWritable = is_writable(storage_path('app/public'));
+$publicStorageExists = file_exists(public_path('storage'));
+$publicStorageIsLink = is_link(public_path('storage'));
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -143,10 +230,11 @@ if ($action) {
     <title>Hostinger Production Web Runner - Jugnu Saloon</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { background-color: #0f172a; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; padding-top: 50px; }
+        body { background-color: #0f172a; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; padding-top: 40px; padding-bottom: 60px; }
         .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
         .btn-custom { border-radius: 8px; font-weight: 700; padding: 12px 20px; transition: all 0.2s; }
         .path-box { background: #0f172a; border: 1px solid #334155; padding: 10px 15px; border-radius: 6px; font-family: monospace; color: #a5f3fc; }
+        .diag-pill { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 8px 12px; font-size: 13px; }
     </style>
 </head>
 <body>
@@ -157,20 +245,53 @@ if ($action) {
                     <div class="d-flex align-items-center justify-content-between mb-4 pb-3 border-bottom border-secondary">
                         <div>
                             <h2 class="fw-black mb-1 text-white">🚀 Hostinger Production Web Runner</h2>
-                            <p class="text-secondary small mb-0">Run Laravel artisan commands & storage symlinks directly from browser</p>
+                            <p class="text-secondary small mb-0">Run Laravel artisan commands, fix image storage & symlinks directly from browser</p>
                         </div>
                         <span class="badge bg-primary px-3 py-2 fs-6">Laravel v<?= app()->version() ?></span>
                     </div>
 
+                    <!-- Server Diagnostics Pill Bar -->
+                    <div class="mb-4">
+                        <label class="form-label text-secondary fw-bold small text-uppercase">Environment & Upload Diagnostics:</label>
+                        <div class="row g-2">
+                            <div class="col-sm-3">
+                                <div class="diag-pill">
+                                    <div class="text-secondary small">Upload Max:</div>
+                                    <strong class="text-warning"><?= htmlspecialchars($uploadMax) ?></strong>
+                                </div>
+                            </div>
+                            <div class="col-sm-3">
+                                <div class="diag-pill">
+                                    <div class="text-secondary small">Post Max:</div>
+                                    <strong class="text-warning"><?= htmlspecialchars($postMax) ?></strong>
+                                </div>
+                            </div>
+                            <div class="col-sm-3">
+                                <div class="diag-pill">
+                                    <div class="text-secondary small">Memory Limit:</div>
+                                    <strong class="text-info"><?= htmlspecialchars($memory) ?></strong>
+                                </div>
+                            </div>
+                            <div class="col-sm-3">
+                                <div class="diag-pill">
+                                    <div class="text-secondary small">Storage Mode:</div>
+                                    <strong class="<?= $publicStorageIsLink ? 'text-success' : 'text-primary' ?>">
+                                        <?= $publicStorageIsLink ? 'Symlink Active' : ($publicStorageExists ? 'Direct Directory' : 'Unlinked') ?>
+                                    </strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- System Paths Info -->
                     <div class="mb-4">
-                        <label class="form-label text-secondary fw-bold small uppercase">Detected Server Paths:</label>
+                        <label class="form-label text-secondary fw-bold small text-uppercase">Detected Server Paths:</label>
                         <div class="mb-2">
                             <small class="text-muted d-block">Storage Public Path:</small>
                             <div class="path-box"><?= storage_path('app/public') ?></div>
                         </div>
                         <div>
-                            <small class="text-muted d-block">Public Storage Shortcut Path:</small>
+                            <small class="text-muted d-block">Public Storage Path:</small>
                             <div class="path-box"><?= public_path('storage') ?></div>
                         </div>
                     </div>
@@ -194,7 +315,12 @@ if ($action) {
                         </div>
                         <div class="col-md-6">
                             <a href="?action=storage_link" class="btn btn-primary w-100 btn-custom fs-5 shadow">
-                                🔗 Fix Storage Symlink (`storage:link`)
+                                🔗 Fix Storage Symlink & Folders
+                            </a>
+                        </div>
+                        <div class="col-md-6">
+                            <a href="?action=sync_images" class="btn btn-info text-dark w-100 btn-custom fs-5 shadow">
+                                🖼️ Sync Images & Fix Folders
                             </a>
                         </div>
                         <div class="col-md-6">
@@ -202,9 +328,9 @@ if ($action) {
                                 📦 Run Database Migrations (`migrate`)
                             </a>
                         </div>
-                        <div class="col-md-6">
-                            <a href="?action=clear_cache" class="btn btn-secondary w-100 btn-custom fs-5 shadow">
-                                🧹 Clear All System Caches
+                        <div class="col-md-12">
+                            <a href="?action=clear_cache" class="btn btn-secondary w-100 btn-custom shadow">
+                                🧹 Clear All System Caches (Config, View, Route, Cache)
                             </a>
                         </div>
                     </div>

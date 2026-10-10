@@ -7,6 +7,7 @@ use App\Models\Account;
 use App\Models\Permission;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\CelebrationService;
 use Illuminate\Http\Request;
 
 class DashboardController extends Controller
@@ -18,27 +19,17 @@ class DashboardController extends Controller
         $permissionsCount = Permission::count();
         $users = User::with('roles')->latest()->take(5)->get();
 
-        // Today's Birthday & Anniversary Celebrations
-        $todayMonth = now()->month;
-        $todayDay = now()->day;
+        // Birthday & Anniversary Celebrations
+        $celebrations = CelebrationService::getCelebrationsData();
 
-        $todayBirthdays = Account::with('category')
-            ->whereMonth('date_of_birth', $todayMonth)
-            ->whereDay('date_of_birth', $todayDay)
-            ->get();
-
-        $todayAnniversaries = Account::with('category')
-            ->whereMonth('date_of_anniversary', $todayMonth)
-            ->whereDay('date_of_anniversary', $todayDay)
-            ->get();
-
-        return view('admin.dashboard', compact(
-            'usersCount', 
-            'rolesCount', 
-            'permissionsCount', 
-            'users',
-            'todayBirthdays',
-            'todayAnniversaries'
+        return view('admin.dashboard', array_merge(
+            compact(
+                'usersCount', 
+                'rolesCount', 
+                'permissionsCount', 
+                'users'
+            ),
+            $celebrations
         ));
     }
 }

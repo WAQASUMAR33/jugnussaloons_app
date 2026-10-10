@@ -4,6 +4,15 @@
 
 @section('content')
 <div class="space-y-6" x-data="galleryManager()">
+    <!-- Global Sticky Top Upload Progress Bar -->
+    <div x-show="isUploading" 
+         x-cloak 
+         class="fixed top-0 left-0 right-0 z-50 h-1.5 bg-indigo-100/60 overflow-hidden shadow-sm pointer-events-none">
+        <div class="h-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 transition-all duration-300 relative overflow-hidden"
+             :style="'width: ' + Math.max(uploadProgress, 4) + '%'">
+            <div class="absolute inset-0 bg-white/30 animate-[shimmer_1.5s_infinite] -skew-x-12"></div>
+        </div>
+    </div>
     <!-- Top Header Banner -->
     <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden border border-slate-800">
         <div class="absolute -right-10 -bottom-10 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
@@ -32,12 +41,33 @@
             <div class="flex flex-wrap items-center gap-3">
                 <button type="button" 
                         @click="openUploadModal = true"
+                        :disabled="isUploading"
+                        :class="{ 'opacity-60 cursor-not-allowed pointer-events-none': isUploading }"
                         class="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-extrabold text-sm rounded-xl shadow-lg shadow-indigo-600/30 hover:shadow-indigo-600/50 transition-all duration-200 flex items-center gap-2 group transform active:scale-95 cursor-pointer">
-                    <svg class="w-5 h-5 group-hover:rotate-90 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"></path>
-                    </svg>
-                    <span>Upload New Photos</span>
+                    <template x-if="!isUploading">
+                        <svg class="w-5 h-5 group-hover:rotate-90 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"></path>
+                        </svg>
+                    </template>
+                    <template x-if="isUploading">
+                        <svg class="w-5 h-5 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </template>
+                    <span x-text="isUploading ? ('Uploading (' + uploadProgress + '%)...') : 'Upload New Photos'"></span>
                 </button>
+
+                @if($galleries->isNotEmpty())
+                    <button type="button"
+                            @click="openDeleteAllModal = true"
+                            class="px-4 py-2.5 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white font-bold text-sm rounded-xl shadow-sm transition-all flex items-center gap-2 border border-rose-500/30 cursor-pointer">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                        <span>Delete All Photos</span>
+                    </button>
+                @endif
 
                 <button type="button"
                         x-show="selectedIds.length > 0"
@@ -180,6 +210,8 @@
                 @endif
                 <button type="button" 
                         @click="openUploadModal = true"
+                        :disabled="isUploading"
+                        :class="{ 'opacity-60 cursor-not-allowed pointer-events-none': isUploading }"
                         class="px-5 py-2 bg-indigo-600 text-white font-bold text-xs rounded-xl hover:bg-indigo-700 shadow-md shadow-indigo-100 transition-all">
                     Upload Photos Now
                 </button>
@@ -204,7 +236,7 @@
         <!-- Grid Container -->
         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
             @foreach($galleries as $gallery)
-                <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden flex flex-col group relative">
+                <div id="gallery-card-{{ $gallery->id }}" class="bg-white rounded-2xl border border-slate-200/80 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden flex flex-col group relative">
                     
                     <!-- Selection Checkbox -->
                     <div class="absolute top-3 left-3 z-20">
@@ -249,22 +281,19 @@
 
                             <!-- Edit Details -->
                             <button type="button" 
-                                    @click.stop="openEditModal({{ $gallery->id }}, '{{ addslashes($gallery->title) }}', '{{ addslashes($gallery->category) }}')"
+                                    @click.stop="openEditModal({{ $gallery->id }}, {{ json_encode($gallery->title) }}, {{ json_encode($gallery->category) }})"
                                     title="Edit Details"
                                     class="w-10 h-10 bg-white/90 hover:bg-white text-purple-600 rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition-transform">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                             </button>
 
-                            <!-- Delete -->
-                            <form action="{{ route('manager.galleries.destroy', $gallery->id) }}" method="POST" @submit.prevent="confirmDelete($event)">
-                                @csrf
-                                @method('DELETE')
-                                <button type="submit" 
-                                        title="Delete Photo"
-                                        class="w-10 h-10 bg-rose-600 hover:bg-rose-700 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition-transform cursor-pointer">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                </button>
-                            </form>
+                            <!-- Delete Photo Button -->
+                            <button type="button" 
+                                    @click.stop="openDeletePhotoModal({{ $gallery->id }}, {{ json_encode($gallery->title ?: $gallery->file_name) }}, {{ json_encode($gallery->url) }})"
+                                    title="Delete Photo"
+                                    class="w-10 h-10 bg-rose-600 hover:bg-rose-700 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition-transform cursor-pointer">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
                         </div>
                     </div>
 
@@ -284,9 +313,19 @@
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                 {{ $gallery->created_at->format('M d, Y') }}
                             </span>
-                            <span class="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md font-extrabold">
-                                {{ $gallery->formatted_size }}
-                            </span>
+                            <div class="flex items-center gap-1.5">
+                                <span class="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md font-extrabold">
+                                    {{ $gallery->formatted_size }}
+                                </span>
+                                <button type="button" 
+                                        @click.stop="openDeletePhotoModal({{ $gallery->id }}, {{ json_encode($gallery->title ?: $gallery->file_name) }}, {{ json_encode($gallery->url) }})"
+                                        title="Delete Photo"
+                                        class="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -305,7 +344,7 @@
          x-transition:leave-end="opacity-0"
          class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
         
-        <div @click.away="openUploadModal = false" 
+        <div @click.away="if (!isUploading) closeUploadModal()" 
              class="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl border border-slate-100 transform transition-all relative">
             
             <div class="flex items-center justify-between pb-4 border-b border-slate-100 mb-6">
@@ -318,19 +357,22 @@
                         <p class="text-xs text-slate-500 font-semibold">Support JPEG, PNG, WEBP, GIF (Max 10MB per file)</p>
                     </div>
                 </div>
-                <button type="button" @click="openUploadModal = false" class="text-slate-400 hover:text-slate-600 p-2 rounded-full hover:bg-slate-100">
+                <button type="button" 
+                        @click="closeUploadModal()" 
+                        :disabled="isUploading"
+                        class="text-slate-400 hover:text-slate-600 p-2 rounded-full hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
 
-            <form action="{{ route('manager.galleries.store') }}" method="POST" enctype="multipart/form-data" class="space-y-5">
-                @csrf
-
+            <form @submit.prevent="submitUpload()" class="space-y-5">
                 <!-- Category & Title Inputs -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Category / Service Tag</label>
-                        <select name="category" class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-indigo-600 text-slate-800">
+                        <select x-model="uploadCategory" 
+                                :disabled="isUploading"
+                                class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-indigo-600 text-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
                             <option value="">-- Select Category --</option>
                             @foreach($allCategories as $catOption)
                                 <option value="{{ $catOption }}" {{ request('category') === $catOption ? 'selected' : '' }}>{{ $catOption }}</option>
@@ -341,36 +383,37 @@
                     <div>
                         <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Optional Display Title</label>
                         <input type="text" 
-                               name="title" 
+                               x-model="uploadTitle"
+                               :disabled="isUploading"
                                placeholder="e.g. Modern Hair Highlights" 
-                               class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-indigo-600 text-slate-800">
+                               class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-indigo-600 text-slate-800 disabled:opacity-60 disabled:cursor-not-allowed">
                     </div>
                 </div>
 
                 <!-- Drag & Drop Upload Zone -->
-                <div>
+                <div :class="{ 'pointer-events-none opacity-60': isUploading }">
                     <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Upload Image Files</label>
-                    <div @dragover.prevent="isDragging = true"
+                    <div @dragover.prevent="if (!isUploading) isDragging = true"
                          @dragleave.prevent="isDragging = false"
-                         @drop.prevent="handleFileDrop($event)"
+                         @drop.prevent="if (!isUploading) handleFileDrop($event)"
                          :class="{ 'border-indigo-500 bg-indigo-50/50 scale-[0.99]': isDragging, 'border-slate-300 bg-slate-50/80': !isDragging }"
-                         class="border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer hover:border-indigo-400 group relative">
+                         class="border-2 border-dashed rounded-2xl p-7 text-center transition-all cursor-pointer hover:border-indigo-400 group relative">
                         
                         <input type="file" 
-                               name="images[]" 
                                id="gallery-file-input" 
                                multiple 
                                accept="image/*"
+                               :disabled="isUploading"
                                @change="handleFileSelect($event)"
-                               class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+                               class="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed">
                         
-                        <div class="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
-                            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div class="w-14 h-14 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-2.5 group-hover:scale-110 transition-transform">
+                            <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
                             </svg>
                         </div>
                         <h4 class="font-extrabold text-sm text-slate-800">Drag & Drop photos here, or <span class="text-indigo-600 underline">Browse</span></h4>
-                        <p class="text-xs text-slate-400 mt-1">Select multiple images at once (Max 10MB per file)</p>
+                        <p class="text-xs text-slate-400 mt-0.5">Select multiple images at once (Max 10MB per file)</p>
                     </div>
                 </div>
 
@@ -379,15 +422,21 @@
                     <div class="space-y-2">
                         <div class="flex items-center justify-between text-xs font-bold text-slate-700">
                             <span>Selected Files (<span x-text="filesPreview.length"></span>)</span>
-                            <button type="button" @click="clearFiles()" class="text-rose-600 hover:underline">Clear All</button>
+                            <button type="button" 
+                                    @click="clearFiles()" 
+                                    :disabled="isUploading"
+                                    class="text-rose-600 hover:underline disabled:opacity-50 disabled:cursor-not-allowed">
+                                Clear All
+                            </button>
                         </div>
-                        <div class="grid grid-cols-4 sm:grid-cols-6 gap-3 max-h-44 overflow-y-auto p-2 bg-slate-50 rounded-xl border border-slate-200/80">
+                        <div class="grid grid-cols-4 sm:grid-cols-6 gap-3 max-h-36 overflow-y-auto p-2 bg-slate-50 rounded-xl border border-slate-200/80">
                             <template x-for="(file, index) in filesPreview" :key="index">
                                 <div class="relative aspect-square rounded-lg overflow-hidden border border-slate-200 group bg-slate-200">
                                     <img :src="file.url" class="w-full h-full object-cover">
                                     <button type="button" 
                                             @click="removeFile(index)" 
-                                            class="absolute top-1 right-1 w-5 h-5 bg-rose-600 text-white rounded-full flex items-center justify-center text-[10px] font-black shadow-md hover:scale-110 transition-transform">
+                                            :disabled="isUploading"
+                                            class="absolute top-1 right-1 w-5 h-5 bg-rose-600 text-white rounded-full flex items-center justify-center text-[10px] font-black shadow-md hover:scale-110 transition-transform disabled:hidden">
                                         ✕
                                     </button>
                                 </div>
@@ -396,18 +445,123 @@
                     </div>
                 </template>
 
+                <!-- Dynamic Upload Progress Section -->
+                <div x-show="isUploading || uploadProgress > 0 || uploadError" 
+                     x-cloak 
+                     x-transition:enter="transition ease-out duration-300"
+                     x-transition:enter-start="opacity-0 -translate-y-2"
+                     x-transition:enter-end="opacity-100 translate-y-0"
+                     class="p-4 rounded-2xl border transition-all duration-300"
+                     :class="{
+                         'bg-indigo-50/70 border-indigo-200/80': isUploading && !uploadSuccess,
+                         'bg-emerald-50/80 border-emerald-200': uploadSuccess,
+                         'bg-rose-50/80 border-rose-200': uploadError
+                     }">
+                    
+                    <!-- Progress Header: Status & Percentage -->
+                    <div class="flex items-center justify-between gap-3 mb-2.5">
+                        <div class="flex items-center gap-2.5 min-w-0">
+                            <!-- Spinner during active upload -->
+                            <template x-if="isUploading && !uploadSuccess">
+                                <div class="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm animate-pulse">
+                                    <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                </div>
+                            </template>
+
+                            <!-- Success checkmark -->
+                            <template x-if="uploadSuccess">
+                                <div class="w-7 h-7 rounded-lg bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-sm">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>
+                                </div>
+                            </template>
+
+                            <!-- Error icon -->
+                            <template x-if="uploadError && !isUploading">
+                                <div class="w-7 h-7 rounded-lg bg-rose-500 text-white flex items-center justify-center shrink-0 shadow-sm">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                </div>
+                            </template>
+
+                            <div class="min-w-0">
+                                <p class="text-xs font-black truncate"
+                                   :class="{
+                                       'text-indigo-950': isUploading && !uploadSuccess,
+                                       'text-emerald-950': uploadSuccess,
+                                       'text-rose-950': uploadError
+                                   }"
+                                   x-text="uploadError ? 'Upload Error' : (uploadSuccess ? 'Upload Complete!' : (uploadProgress >= 100 ? 'Processing...' : 'Uploading Photos...'))">
+                                </p>
+                                <p class="text-[11px] font-semibold truncate"
+                                   :class="{
+                                       'text-indigo-600': isUploading && !uploadSuccess,
+                                       'text-emerald-600': uploadSuccess,
+                                       'text-rose-600': uploadError
+                                   }"
+                                   x-text="uploadError ? uploadError : uploadStatusText">
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Percentage Badge / Dismiss -->
+                        <div class="shrink-0">
+                            <template x-if="!uploadError">
+                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-black tracking-wide"
+                                      :class="uploadSuccess ? 'bg-emerald-500 text-white shadow-sm' : 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/30'">
+                                    <span x-text="uploadProgress"></span>%
+                                </span>
+                            </template>
+                            <template x-if="uploadError">
+                                <button type="button" @click="uploadError = null" class="text-rose-600 hover:text-rose-800 text-xs font-black underline">
+                                    Dismiss
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Progress Bar Track -->
+                    <template x-if="!uploadError">
+                        <div class="w-full bg-white rounded-full h-3 overflow-hidden p-0.5 border border-indigo-100/80 shadow-inner relative">
+                            <div class="h-full rounded-full transition-all duration-300 relative overflow-hidden"
+                                 :class="uploadSuccess ? 'bg-gradient-to-r from-emerald-500 to-teal-500' : 'bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500'"
+                                 :style="'width: ' + Math.max(uploadProgress, 4) + '%'">
+                                <div class="absolute inset-0 bg-white/25 animate-[shimmer_1.5s_infinite] -skew-x-12"></div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Extra stats line (file sizes) -->
+                    <div x-show="uploadByteStats" class="flex justify-between items-center text-[10px] text-indigo-500/80 font-bold mt-1.5 px-0.5">
+                        <span x-text="uploadByteStats"></span>
+                        <span x-show="isUploading && uploadProgress < 100" class="flex items-center gap-1 text-indigo-600">
+                            <span class="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping"></span>
+                            Uploading to server
+                        </span>
+                    </div>
+                </div>
+
                 <!-- Modal Actions -->
                 <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
                     <button type="button" 
-                            @click="openUploadModal = false" 
-                            class="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all">
+                            @click="closeUploadModal()" 
+                            :disabled="isUploading"
+                            :class="{ 'opacity-50 cursor-not-allowed pointer-events-none': isUploading }"
+                            class="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer disabled:cursor-not-allowed">
                         Cancel
                     </button>
                     <button type="submit" 
-                            :disabled="filesPreview.length === 0"
-                            :class="{ 'opacity-50 cursor-not-allowed': filesPreview.length === 0 }"
-                            class="px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-indigo-600/30 transition-all">
-                        Upload Photos Now
+                            :disabled="filesPreview.length === 0 || isUploading"
+                            :class="{ 'opacity-50 cursor-not-allowed pointer-events-none': filesPreview.length === 0 || isUploading, 'hover:from-indigo-500 hover:to-purple-500 hover:shadow-indigo-600/50 cursor-pointer': filesPreview.length > 0 && !isUploading }"
+                            class="px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-indigo-600/30 transition-all flex items-center gap-2 disabled:cursor-not-allowed">
+                        <template x-if="isUploading">
+                            <svg class="w-4 h-4 animate-spin text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                        </template>
+                        <span x-text="isUploading ? ('Uploading (' + uploadProgress + '%)...') : (uploadSuccess ? 'Done!' : 'Upload Photos Now')"></span>
                     </button>
                 </div>
             </form>
@@ -466,6 +620,61 @@
         </div>
     </div>
 
+    <!-- Single Photo Delete Modal -->
+    <div x-show="openSingleDeleteModal" 
+         x-cloak
+         x-transition:enter="transition ease-out duration-300"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-200"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        
+        <div @click.away="if (!isDeletingSingle) openSingleDeleteModal = false" class="bg-white rounded-3xl max-w-md w-full p-6 text-center shadow-2xl border border-slate-100 relative">
+            <!-- Thumbnail preview -->
+            <div class="relative w-24 h-24 mx-auto mb-4 rounded-2xl overflow-hidden border-2 border-rose-100 shadow-inner bg-slate-100">
+                <img :src="deleteTarget.url" 
+                     onerror="this.onerror=null; this.src='{{ asset('images/placeholder-gallery.svg') }}';" 
+                     class="w-full h-full object-cover">
+                <div class="absolute inset-0 bg-rose-950/20 flex items-center justify-center">
+                    <div class="w-8 h-8 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-md">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    </div>
+                </div>
+            </div>
+
+            <h3 class="text-lg font-black text-slate-900">Delete Gallery Photo</h3>
+            <p class="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
+                Are you sure you want to permanently delete <strong class="text-slate-800 font-extrabold" x-text="deleteTarget.title"></strong>? This cannot be undone.
+            </p>
+
+            <div class="mt-6 flex items-center justify-center gap-3">
+                <button type="button" 
+                        @click="openSingleDeleteModal = false" 
+                        :disabled="isDeletingSingle"
+                        class="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all disabled:opacity-50">
+                    Cancel
+                </button>
+                <button type="button" 
+                        @click="executeDeletePhoto()" 
+                        :disabled="isDeletingSingle"
+                        class="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-rose-600/30 transition-all flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed">
+                    <template x-if="isDeletingSingle">
+                        <svg class="w-4 h-4 animate-spin text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    </template>
+                    <span x-text="isDeletingSingle ? 'Deleting...' : 'Yes, Delete Photo'"></span>
+                </button>
+            </div>
+
+            <!-- Fallback form for pure HTML submission -->
+            <form id="single-delete-fallback-form" method="POST" class="hidden">
+                @csrf
+                @method('DELETE')
+            </form>
+        </div>
+    </div>
+
     <!-- Bulk Delete Modal -->
     <div x-show="openBulkDeleteModal" 
          x-cloak
@@ -480,16 +689,49 @@
                 Are you sure you want to permanently delete <span class="font-extrabold text-rose-600" x-text="selectedIds.length"></span> selected photo(s)? This action cannot be undone.
             </p>
 
-            <form action="{{ route('manager.galleries.bulk-delete') }}" method="POST" class="mt-6 flex items-center justify-center gap-3">
+            <form @submit.prevent="executeBulkDelete()" action="{{ route('manager.galleries.bulk-delete') }}" method="POST" class="mt-6 flex items-center justify-center gap-3">
                 @csrf
                 <template x-for="id in selectedIds" :key="id">
                     <input type="hidden" name="ids[]" :value="id">
                 </template>
-                <button type="button" @click="openBulkDeleteModal = false" class="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl">
+                <button type="button" @click="openBulkDeleteModal = false" :disabled="isDeletingBulk" class="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed">
                     Cancel
                 </button>
-                <button type="submit" class="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-rose-600/30">
-                    Yes, Delete Selected
+                <button type="submit" :disabled="isDeletingBulk || selectedIds.length === 0" class="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-rose-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
+                    <template x-if="isDeletingBulk">
+                        <svg class="w-4 h-4 animate-spin text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    </template>
+                    <span x-text="isDeletingBulk ? 'Deleting...' : 'Yes, Delete Selected'"></span>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Delete All Modal -->
+    <div x-show="openDeleteAllModal" 
+         x-cloak
+         class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        
+        <div @click.away="if (!isDeletingAll) openDeleteAllModal = false" class="bg-white rounded-3xl max-w-md w-full p-6 text-center shadow-2xl border border-slate-100">
+            <div class="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+            </div>
+            <h3 class="text-lg font-black text-slate-900">Delete All Gallery Photos</h3>
+            <p class="text-xs text-slate-500 mt-2">
+                Are you sure you want to permanently delete <span class="font-extrabold text-rose-600">ALL</span> gallery photos and files? This action cannot be undone.
+            </p>
+
+            <form @submit.prevent="executeDeleteAll()" action="{{ route('manager.galleries.delete-all') }}" method="POST" class="mt-6 flex items-center justify-center gap-3">
+                @csrf
+                @method('DELETE')
+                <button type="button" @click="openDeleteAllModal = false" :disabled="isDeletingAll" class="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed">
+                    Cancel
+                </button>
+                <button type="submit" :disabled="isDeletingAll" class="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-rose-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
+                    <template x-if="isDeletingAll">
+                        <svg class="w-4 h-4 animate-spin text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    </template>
+                    <span x-text="isDeletingAll ? 'Deleting All...' : 'Yes, Delete Everything'"></span>
                 </button>
             </form>
         </div>
@@ -544,6 +786,12 @@
             openUploadModal: false,
             openEditModalState: false,
             openBulkDeleteModal: false,
+            openDeleteAllModal: false,
+            openSingleDeleteModal: false,
+            isDeletingSingle: false,
+            isDeletingBulk: false,
+            isDeletingAll: false,
+            deleteTarget: { id: null, title: '', url: '' },
             lightboxOpen: false,
             lightboxSrc: '',
             lightboxTitle: '',
@@ -555,6 +803,124 @@
             editFormUrl: '',
             toastShow: false,
             toastMessage: '',
+
+            // Upload Progress States
+            isUploading: false,
+            uploadProgress: 0,
+            uploadSuccess: false,
+            uploadError: null,
+            uploadStatusText: '',
+            uploadByteStats: '',
+            uploadCategory: '{{ request('category') && request('category') !== 'all' ? request('category') : '' }}',
+            uploadTitle: '',
+
+            closeUploadModal() {
+                if (this.isUploading) return;
+                this.openUploadModal = false;
+                this.clearFiles();
+                this.uploadProgress = 0;
+                this.uploadError = null;
+                this.uploadSuccess = false;
+                this.uploadStatusText = '';
+                this.uploadByteStats = '';
+                this.uploadTitle = '';
+                const fileInput = document.getElementById('gallery-file-input');
+                if (fileInput) fileInput.value = '';
+            },
+
+            formatBytes(bytes) {
+                if (!bytes || bytes <= 0) return '0 B';
+                if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB';
+                if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+                if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
+                return bytes + ' B';
+            },
+
+            submitUpload() {
+                if (this.filesPreview.length === 0 || this.isUploading) return;
+
+                const formData = new FormData();
+                formData.append('_token', '{{ csrf_token() }}');
+                if (this.uploadCategory) {
+                    formData.append('category', this.uploadCategory);
+                }
+                if (this.uploadTitle) {
+                    formData.append('title', this.uploadTitle);
+                }
+
+                this.filesPreview.forEach(item => {
+                    formData.append('images[]', item.file);
+                });
+
+                this.isUploading = true;
+                this.uploadProgress = 0;
+                this.uploadSuccess = false;
+                this.uploadError = null;
+                this.uploadStatusText = 'Preparing upload...';
+                this.uploadByteStats = '';
+
+                const xhr = new XMLHttpRequest();
+
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        const percent = Math.round((e.loaded / e.total) * 100);
+                        this.uploadProgress = percent;
+                        this.uploadByteStats = `${this.formatBytes(e.loaded)} of ${this.formatBytes(e.total)}`;
+
+                        if (percent >= 100) {
+                            this.uploadStatusText = 'Upload finished! Storing and optimizing images on server...';
+                        } else {
+                            this.uploadStatusText = `Uploading media files (${this.filesPreview.length} items)...`;
+                        }
+                    }
+                });
+
+                xhr.addEventListener('load', () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        this.uploadProgress = 100;
+                        this.isUploading = false;
+                        this.uploadSuccess = true;
+                        this.uploadStatusText = 'All photos uploaded successfully!';
+
+                        let res;
+                        try {
+                            res = JSON.parse(xhr.responseText);
+                        } catch(err) {
+                            res = null;
+                        }
+
+                        const msg = res && res.message ? res.message : 'Photos uploaded successfully!';
+                        this.showToast(msg);
+
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 900);
+                    } else {
+                        this.isUploading = false;
+                        let errMsg = 'Failed to upload images. Please check file sizes and formats.';
+                        try {
+                            const res = JSON.parse(xhr.responseText);
+                            if (res.message) {
+                                errMsg = res.message;
+                            } else if (res.errors) {
+                                const firstKey = Object.keys(res.errors)[0];
+                                errMsg = res.errors[firstKey][0];
+                            }
+                        } catch(e) {}
+                        this.uploadError = errMsg;
+                    }
+                });
+
+                xhr.addEventListener('error', () => {
+                    this.isUploading = false;
+                    this.uploadError = 'A network error occurred during upload. Please try again.';
+                });
+
+                xhr.open('POST', '{{ route('manager.galleries.store') }}');
+                xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+                xhr.setRequestHeader('Accept', 'application/json');
+                xhr.send(formData);
+            },
 
             handleFileSelect(e) {
                 const files = e.target.files;
@@ -606,9 +972,132 @@
             },
 
             openEditModal(id, title, category) {
-                this.editItem = { id, title, category };
+                this.editItem = { id, title: title || '', category: category || '' };
                 this.editFormUrl = `/manager/galleries/${id}`;
                 this.openEditModalState = true;
+            },
+
+            openDeletePhotoModal(id, title, url) {
+                this.deleteTarget = {
+                    id: id,
+                    title: title || 'this photo',
+                    url: url || ''
+                };
+                this.openSingleDeleteModal = true;
+            },
+
+            async executeDeletePhoto() {
+                if (!this.deleteTarget.id || this.isDeletingSingle) return;
+                this.isDeletingSingle = true;
+
+                try {
+                    const response = await fetch(`/manager/galleries/${this.deleteTarget.id}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                            'Accept': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }
+                    });
+                    const data = await response.json();
+                    if (response.ok && data.success) {
+                        this.showToast(data.message || 'Gallery photo deleted successfully!');
+                        this.openSingleDeleteModal = false;
+                        const targetId = this.deleteTarget.id;
+                        const card = document.getElementById(`gallery-card-${targetId}`);
+                        if (card) {
+                            card.style.transition = 'all 0.35s ease';
+                            card.style.opacity = '0';
+                            card.style.transform = 'scale(0.85)';
+                            setTimeout(() => {
+                                card.remove();
+                                const remaining = document.querySelectorAll('[id^="gallery-card-"]');
+                                if (remaining.length === 0) {
+                                    window.location.reload();
+                                }
+                            }, 350);
+                        } else {
+                            window.location.reload();
+                        }
+                    } else {
+                        alert(data.message || 'Failed to delete photo.');
+                    }
+                } catch(err) {
+                    console.error('Delete photo error:', err);
+                    const fallbackForm = document.getElementById('single-delete-fallback-form');
+                    if (fallbackForm) {
+                        fallbackForm.action = `/manager/galleries/${this.deleteTarget.id}`;
+                        fallbackForm.submit();
+                        return;
+                    }
+                    alert('Network error while deleting photo.');
+                } finally {
+                    this.isDeletingSingle = false;
+                }
+            },
+
+            async executeBulkDelete() {
+                if (this.selectedIds.length === 0 || this.isDeletingBulk) return;
+                this.isDeletingBulk = true;
+
+                try {
+                    const response = await fetch('{{ route('manager.galleries.bulk-delete') }}', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                            'Accept': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        body: JSON.stringify({ ids: this.selectedIds })
+                    });
+                    const data = await response.json();
+                    if (response.ok && data.success) {
+                        this.showToast(data.message || 'Selected photos deleted successfully!');
+                        this.openBulkDeleteModal = false;
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 600);
+                    } else {
+                        alert(data.message || 'Failed to delete selected photos.');
+                    }
+                } catch(err) {
+                    console.error('Bulk delete error:', err);
+                    alert('Network error while deleting selected photos.');
+                } finally {
+                    this.isDeletingBulk = false;
+                }
+            },
+
+            async executeDeleteAll() {
+                if (this.isDeletingAll) return;
+                this.isDeletingAll = true;
+
+                try {
+                    const response = await fetch('{{ route('manager.galleries.delete-all') }}', {
+                        method: 'DELETE',
+                        headers: {
+                            'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                            'Accept': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }
+                    });
+                    const data = await response.json();
+                    if (response.ok && data.success) {
+                        this.showToast(data.message || 'All gallery photos deleted successfully!');
+                        this.openDeleteAllModal = false;
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 600);
+                    } else {
+                        alert(data.message || 'Failed to delete all photos.');
+                    }
+                } catch(err) {
+                    console.error('Delete all error:', err);
+                    alert('Network error while deleting all photos.');
+                } finally {
+                    this.isDeletingAll = false;
+                }
             },
 
             copyToClipboard(url) {
@@ -633,4 +1122,11 @@
         }
     }
 </script>
+
+<style>
+@keyframes shimmer {
+    0% { transform: translateX(-100%) skewX(-12deg); }
+    100% { transform: translateX(200%) skewX(-12deg); }
+}
+</style>
 @endsection

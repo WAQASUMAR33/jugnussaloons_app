@@ -43,6 +43,27 @@ foreach ($item in $filesToCopy) {
 # Ensure bootstrap/cache in deploy directory is clean
 Get-ChildItem -Path "$deployDir\bootstrap\cache" -Filter "*.php" | Where-Object { $_.Name -ne ".gitignore" } | Remove-Item -Force -ErrorAction SilentlyContinue
 
+# Ensure clean public/storage and storage/app/public directory structure
+$storageSubDirs = @("products", "services", "categories", "branding", "galleries", "receipts")
+$deployStorageAppPublic = Join-Path $deployDir "storage\app\public"
+$deployPublicStorage = Join-Path $deployDir "public\storage"
+
+# If public/storage is a junction or symlink from Windows, remove it so it doesn't break Linux extraction
+if (Test-Path $deployPublicStorage) {
+    $item = Get-Item $deployPublicStorage -Force -ErrorAction SilentlyContinue
+    if ($item.Attributes -match "ReparsePoint") {
+        Remove-Item $deployPublicStorage -Force -Recurse -ErrorAction SilentlyContinue
+    }
+}
+
+# Create standard subdirectories in both locations
+foreach ($sub in $storageSubDirs) {
+    $dir1 = Join-Path $deployStorageAppPublic $sub
+    $dir2 = Join-Path $deployPublicStorage $sub
+    if (-not (Test-Path $dir1)) { New-Item -ItemType Directory -Path $dir1 -Force | Out-Null }
+    if (-not (Test-Path $dir2)) { New-Item -ItemType Directory -Path $dir2 -Force | Out-Null }
+}
+
 # Remove existing zip files
 if (Test-Path $saloonZip) { Remove-Item $saloonZip -Force -ErrorAction SilentlyContinue }
 if (Test-Path $hostingerZip) { Remove-Item $hostingerZip -Force -ErrorAction SilentlyContinue }

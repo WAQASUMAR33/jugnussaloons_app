@@ -10,11 +10,13 @@ use App\Models\BankAccount;
 use App\Models\ContactMessage;
 use App\Models\Gallery;
 use App\Models\Product;
+use App\Models\ProductCategory;
 use App\Models\SaloonService;
 use App\Models\ServiceCategory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use App\Services\ImageUploadService;
 
 class PublicApiController extends Controller
 {
@@ -24,16 +26,26 @@ class PublicApiController extends Controller
     public function products(Request $request)
     {
         $search = $request->query('search');
+        $categoryId = $request->query('category_id');
 
-        $query = Product::query();
+        $query = Product::with('category');
 
         if ($search) {
             $query->where('title', 'like', "%{$search}%");
         }
 
+        if ($categoryId) {
+            $query->where('product_category_id', $categoryId);
+        }
+
         $products = $query->orderBy('created_at', 'desc')->get()->map(function ($product) {
             return [
                 'id' => $product->id,
+                'product_category_id' => $product->product_category_id,
+                'category' => $product->category ? [
+                    'id' => $product->category->id,
+                    'title' => $product->category->title,
+                ] : null,
                 'title' => $product->title,
                 'price' => (float) $product->price,
                 'discount' => (float) $product->discount,
@@ -47,6 +59,80 @@ class PublicApiController extends Controller
         return response()->json([
             'success' => true,
             'data' => $products,
+        ]);
+    }
+
+    /**
+     * Fetch product categories for filtering and front-end display.
+     */
+    public function productCategories(Request $request)
+    {
+        $search = $request->query('search');
+
+        $query = ProductCategory::withCount('products');
+
+        if ($search) {
+            $query->where('title', 'like', "%{$search}%")
+                  ->orWhere('description', 'like', "%{$search}%");
+        }
+
+        $categories = $query->orderBy('title', 'asc')->get()->map(function ($category) {
+            return [
+                'id' => $category->id,
+                'title' => $category->title,
+                'description' => $category->description,
+                'products_count' => (int) $category->products_count,
+                'image_url' => $category->image ? url($category->image) : null,
+                'created_at' => $category->created_at,
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => $categories,
+        ]);
+    }
+
+    /**
+     * Fetch a single product category with its products.
+     */
+    public function showProductCategory($id)
+    {
+        $category = ProductCategory::withCount('products')
+            ->with(['products' => function ($q) {
+                $q->orderBy('created_at', 'desc');
+            }])
+            ->find($id);
+
+        if (!$category) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Product category not found.',
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'id' => $category->id,
+                'title' => $category->title,
+                'description' => $category->description,
+                'products_count' => (int) $category->products_count,
+                'image_url' => $category->image ? url($category->image) : null,
+                'created_at' => $category->created_at,
+                'products' => $category->products->map(function ($product) {
+                    return [
+                        'id' => $product->id,
+                        'title' => $product->title,
+                        'price' => (float) $product->price,
+                        'discount' => (float) $product->discount,
+                        'discounted_price' => (float) ($product->discounted_price ?? $product->calculateDiscountedPrice()),
+                        'stock' => (int) $product->stock,
+                        'image_url' => $product->image ? url($product->image) : null,
+                        'created_at' => $product->created_at,
+                    ];
+                }),
+            ],
         ]);
     }
 
@@ -230,10 +316,7 @@ class PublicApiController extends Controller
 
         $receiptPath = null;
         if ($request->hasFile('receipt_image')) {
-            $file = $request->file('receipt_image');
-            $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-            $file->move(public_path('uploads/receipts'), $filename);
-            $receiptPath = 'uploads/receipts/' . $filename;
+            $receiptPath = ImageUploadService::upload($request->file('receipt_image'), 'receipts', 'receipt');
         }
 
         $appointment = DB::transaction(function () use ($validated, $receiptPath, $orderType, $request) {
@@ -330,7 +413,7 @@ class PublicApiController extends Controller
                 'total_commission' => $totalCommission,
                 'status' => 'pending',
                 'notes' => ($validated['notes'] ?? '') . " [Front-end {$orderType} booking: {$validated['customer_name']} - Phone: {$validated['customer_phone']}]",
-                'receipt_image' => $receiptPath ? url($receiptPath) : null,
+                'receipt_image' => $receiptPath,
             ]);
 
             foreach ($processedItems as $item) {
@@ -479,6 +562,7 @@ class PublicApiController extends Controller
                 'address' => $customer->address,
                 'card_type' => $customer->card_type,
                 'card_no' => $customer->card_no,
+                'card_expire_date' => $customer->card_expire_date ? $customer->card_expire_date->format('Y-m-d') : null,
                 'date_of_birth' => $dob,
                 'date_of_anniversary' => $anniv,
                 'balance' => (float) $customer->balance,
@@ -551,6 +635,7 @@ class PublicApiController extends Controller
                 'address' => $customer->address,
                 'card_type' => $customer->card_type,
                 'card_no' => $customer->card_no,
+                'card_expire_date' => $customer->card_expire_date ? $customer->card_expire_date->format('Y-m-d') : null,
                 'date_of_birth' => $dob,
                 'date_of_anniversary' => $anniv,
                 'balance' => (float) $customer->balance,

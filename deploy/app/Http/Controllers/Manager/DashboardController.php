@@ -7,6 +7,7 @@ use App\Models\Account;
 use App\Models\Appointment;
 use App\Models\Sale;
 use App\Models\SaloonService;
+use App\Services\CelebrationService;
 use Illuminate\Http\Request;
 
 class DashboardController extends Controller
@@ -20,26 +21,16 @@ class DashboardController extends Controller
         $appointmentsCount = Appointment::count();
         $todaySales = Sale::whereDate('sale_date', now()->format('Y-m-d'))->sum('total_amount');
 
-        // Today's Birthday & Anniversary Celebrations
-        $todayMonth = now()->month;
-        $todayDay = now()->day;
+        // Birthday & Anniversary Celebrations
+        $celebrations = CelebrationService::getCelebrationsData();
 
-        $todayBirthdays = Account::with('category')
-            ->whereMonth('date_of_birth', $todayMonth)
-            ->whereDay('date_of_birth', $todayDay)
-            ->get();
-
-        $todayAnniversaries = Account::with('category')
-            ->whereMonth('date_of_anniversary', $todayMonth)
-            ->whereDay('date_of_anniversary', $todayDay)
-            ->get();
-
-        return view('manager.dashboard', compact(
-            'servicesCount', 
-            'appointmentsCount', 
-            'todaySales',
-            'todayBirthdays',
-            'todayAnniversaries'
+        return view('manager.dashboard', array_merge(
+            compact(
+                'servicesCount', 
+                'appointmentsCount', 
+                'todaySales'
+            ),
+            $celebrations
         ));
     }
 }

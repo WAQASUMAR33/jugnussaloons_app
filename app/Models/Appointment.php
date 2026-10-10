@@ -35,6 +35,7 @@ class Appointment extends Model
         'notes',
         'receipt_image',
         'payment_mode',
+        'split_payments',
         'extra_amount',
     ];
 
@@ -49,6 +50,7 @@ class Appointment extends Model
         'extra_amount' => 'decimal:2',
         'ranking' => 'integer',
         'ranked_at' => 'datetime',
+        'split_payments' => 'array',
     ];
 
     /**
@@ -104,13 +106,5 @@ class Appointment extends Model
     public function discountApprover(): BelongsTo
     {
         return $this->belongsTo(User::class, 'discount_approved_by');
-    }
-
-    /**
-     * Discount approval request history logs.
-     */
-    public function discountRequests(): HasMany
-    {
-        return $this->hasMany(DiscountRequest::class, 'appointment_id');
     }
 }

@@ -1,3 +1,112 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* =========================================================
+   Cross-Document View Transitions (Modern Browsers MPA)
+   ========================================================= */
+@view-transition {
+    navigation: auto;
+}
+
+::view-transition-old(root) {
+    animation: 180ms cubic-bezier(0.4, 0, 1, 1) both appPageFadeOut;
+}
+
+::view-transition-new(root) {
+    animation: 240ms cubic-bezier(0, 0, 0.2, 1) both appPageFadeIn;
+}
+
+@keyframes appPageFadeOut {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+}
+
+@keyframes appPageFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* =========================================================
+   Universal Fallback & Main Content Smooth Enter/Exit
+   ========================================================= */
+@keyframes appPageEnter {
+    0% {
+        opacity: 0;
+    }
+    100% {
+        opacity: 1;
+    }
+}
+
+.page-smooth-enter {
+    animation: appPageEnter 0.2s cubic-bezier(0.16, 1, 0.3, 1) ease-out;
+}
+
+.page-smooth-exit {
+    opacity: 0.65 !important;
+    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Top Progress Bar Luminous Glow */
+#app-page-progress-bar {
+    box-shadow: 0 0 10px rgba(99, 102, 241, 0.6), 0 0 4px rgba(168, 85, 247, 0.5);
+}
+
+/* Reduced Motion Respect */
+@media (prefers-reduced-motion: reduce) {
+    ::view-transition-old(root),
+    ::view-transition-new(root),
+    .page-smooth-enter {
+        animation: none !important;
+    }
+    .page-smooth-exit {
+        transition: none !important;
+    }
+}
+
+/* =========================================================
+   Responsive Multi-Device Optimizations (Mobile, Tablet, Desktop, Large)
+   ========================================================= */
+/* Smooth momentum scrolling on mobile iOS & Android */
+.overflow-x-auto,
+.overflow-y-auto {
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Hide scrollbar utility for clean responsive horizontal tab navigation */
+.scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+    display: none;
+}
+
+/* Responsive Table scroll container with subtle scroll hint */
+.table-responsive {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    position: relative;
+}
+
+/* Mobile viewport notch safety */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+    body {
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+}
+

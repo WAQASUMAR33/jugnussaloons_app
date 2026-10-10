@@ -6,7 +6,16 @@
 <div x-data="{ 
     createModalOpen: false,
     editModalOpen: false,
-    editCategory: { id: null, title: '', description: '', image: null }
+    editCategory: { id: null, title: '', description: '', image: null },
+    openEditModal(cat) {
+        this.editCategory = {
+            id: cat.id,
+            title: cat.title || '',
+            description: cat.description || '',
+            image: cat.image || ''
+        };
+        this.editModalOpen = true;
+    }
 }" class="space-y-6">
 
     <!-- Header & Action Bar -->
@@ -66,10 +75,16 @@
                 </thead>
                 <tbody class="divide-y divide-slate-100 text-sm">
                     @forelse($categories as $cat)
+                    @php
+                        $catPayload = [
+                            'id' => $cat->id,
+                            'title' => (string) $cat->title,
+                            'description' => (string) ($cat->description ?? ''),
+                            'image' => $cat->image ? asset($cat->image) : '',
+                        ];
+                    @endphp
                     <tr class="hover:bg-slate-50/60 transition-colors">
-                        <td class="py-4 px-6 font-mono font-bold text-xs text-slate-400">
-                            #{{ $cat->id }}
-                        </td>
+                        <td class="py-4 px-6 font-bold text-xs text-slate-400">#{{ $cat->id }}</td>
                         <td class="py-4 px-6">
                             @if($cat->image)
                                 <img src="{{ asset($cat->image) }}" alt="{{ $cat->title }}" class="w-12 h-12 rounded object-cover border border-slate-200 shadow-sm">
@@ -92,12 +107,13 @@
                         </td>
                         <td class="py-4 px-6 text-right">
                             <div class="flex items-center justify-end gap-2">
-                                <button @click="editCategory = { id: {{ $cat->id }}, title: '{{ addslashes($cat->title) }}', description: '{{ addslashes($cat->description ?? '') }}', image: '{{ $cat->image ? asset($cat->image) : '' }}' }; editModalOpen = true" 
+                                <button type="button" 
+                                        @click="openEditModal({{ Js::from($catPayload) }})" 
                                         class="p-2 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 transition-colors" title="Edit Category">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
                                 </button>
 
-                                <form method="POST" action="{{ route('manager.service-categories.destroy', $cat) }}" onsubmit="return confirm('Delete service category {{ addslashes($cat->title) }}?');" class="inline">
+                                <form method="POST" action="{{ route('manager.service-categories.destroy', $cat) }}" onsubmit="return confirm({{ Js::from('Delete service category ' . $cat->title . '?') }});" class="inline">
                                     @csrf
                                     @method('DELETE')
                                     <button type="submit" class="p-2 text-slate-600 hover:text-red-600 hover:bg-red-50 transition-colors" title="Delete Category">

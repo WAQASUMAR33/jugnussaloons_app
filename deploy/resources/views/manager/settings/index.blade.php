@@ -59,7 +59,7 @@
         </div>
     @endif
 
-    @if($errors->any())
+    @if(isset($errors) && $errors->any())
         <div class="p-4 bg-rose-50 border-l-4 border-rose-500 text-rose-800 shadow-2xs">
             <h4 class="font-extrabold text-sm mb-1">Please correct the following errors:</h4>
             <ul class="list-disc list-inside text-xs space-y-1">
@@ -168,6 +168,111 @@
                         Complete Store Address
                     </label>
                     <textarea name="brand_address" id="brand_address" rows="3" placeholder="e.g. Shop #12, Commercial Plaza, Main Boulevard, Saloon District, City" class="w-full px-4 py-3 bg-slate-50 border border-slate-200 text-sm font-bold text-slate-800 focus:bg-white focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600">{{ old('brand_address', $setting->brand_address) }}</textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- WhatsApp Celebration Message Templates (Birthdate & Marriage Ceremony) -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-8 border-b border-slate-200">
+            <div class="lg:col-span-1 space-y-2">
+                <h3 class="text-lg font-black text-slate-900 flex items-center gap-2">
+                    <span class="w-2 h-2 bg-emerald-500"></span>
+                    WhatsApp Wishing Messages
+                </h3>
+                <p class="text-xs text-slate-500 leading-relaxed">
+                    Personalize default wishing messages sent via WhatsApp for client birthdates and marriage ceremony anniversaries.
+                </p>
+                <div class="p-3 bg-indigo-50/70 border border-indigo-100 rounded-none space-y-1.5 mt-3">
+                    <p class="text-[11px] font-black text-indigo-950 uppercase tracking-wider">Dynamic Placeholders:</p>
+                    <div class="flex flex-wrap gap-1 text-[10px] font-mono font-bold text-indigo-700">
+                        <span class="bg-white px-1.5 py-0.5 border border-indigo-200">{name}</span>
+                        <span class="bg-white px-1.5 py-0.5 border border-indigo-200">{salon_name}</span>
+                        <span class="bg-white px-1.5 py-0.5 border border-indigo-200">{date}</span>
+                        <span class="bg-white px-1.5 py-0.5 border border-indigo-200">{milestone}</span>
+                    </div>
+                    <p class="text-[10px] text-indigo-600/90 leading-tight pt-1">Tags are automatically substituted with client data upon sending.</p>
+                </div>
+            </div>
+
+            <div class="lg:col-span-2 space-y-6">
+                <!-- Birthday Message Template -->
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between">
+                        <label for="whatsapp_birthday_message" class="block text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                            <span>🎂 Birthday Wishing Message (Birthdate)</span>
+                        </label>
+                        <span class="text-[10px] font-bold text-slate-400">1-Click WhatsApp Trigger</span>
+                    </div>
+                    <textarea name="whatsapp_birthday_message" id="whatsapp_birthday_message" rows="3" 
+                              placeholder="e.g. Happy Birthday {name}! 🎂 Wishing you a wonderful day from {salon_name}..." 
+                              class="w-full px-4 py-3 bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:bg-white focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600">{{ old('whatsapp_birthday_message', $setting->whatsapp_birthday_message ?: \App\Models\Setting::defaultBirthdayMessage()) }}</textarea>
+                    <p class="text-[11px] text-slate-500">Sent to clients on their birthdate with invitation and special discount offer.</p>
+                </div>
+
+                <!-- Marriage Ceremony / Anniversary Template -->
+                <div class="space-y-2 pt-2 border-t border-slate-100">
+                    <div class="flex items-center justify-between">
+                        <label for="whatsapp_anniversary_message" class="block text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                            <span>💍 Marriage Ceremony / Wedding Anniversary Message</span>
+                        </label>
+                        <span class="text-[10px] font-bold text-slate-400">1-Click WhatsApp Trigger</span>
+                    </div>
+                    <textarea name="whatsapp_anniversary_message" id="whatsapp_anniversary_message" rows="3" 
+                              placeholder="e.g. Happy Marriage Anniversary {name}! 💍 Wishing you both endless happiness from {salon_name}..." 
+                              class="w-full px-4 py-3 bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:bg-white focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600">{{ old('whatsapp_anniversary_message', $setting->whatsapp_anniversary_message ?: \App\Models\Setting::defaultAnniversaryMessage()) }}</textarea>
+                    <p class="text-[11px] text-slate-500">Sent to clients on their marriage ceremony milestone with luxury couple package offer.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Print Receipt Invoices Notes (1 - POS & 2 - Appointments) -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-8 border-b border-slate-200">
+            <div class="lg:col-span-1 space-y-2">
+                <h3 class="text-lg font-black text-slate-900 flex items-center gap-2">
+                    <span class="w-2 h-2 bg-blue-600"></span>
+                    Print Receipt Invoices Notes
+                </h3>
+                <p class="text-xs text-slate-500 leading-relaxed">
+                    Customize the footer notes, policy disclaimers, terms, or greeting messages printed on customer receipts.
+                </p>
+                <div class="p-3 bg-blue-50/70 border border-blue-100 space-y-1.5 mt-3">
+                    <p class="text-[11px] font-black text-blue-950 uppercase tracking-wider">Receipt Types:</p>
+                    <ul class="text-[10px] text-blue-800 space-y-1 font-medium">
+                        <li>• <strong class="font-bold">1 - POS Print Receipt:</strong> Product sales checkout slips.</li>
+                        <li>• <strong class="font-bold">2 - Appointment Booking Receipt:</strong> Salon service & booking slips.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="lg:col-span-2 space-y-6">
+                <!-- 1 - POS Print Receipt Notes -->
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between">
+                        <label for="pos_receipt_note" class="block text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                            <span class="px-1.5 py-0.5 bg-blue-100 text-blue-800 text-[10px] font-mono font-bold">1</span>
+                            <span>POS Print Receipt Note</span>
+                        </label>
+                        <span class="text-[10px] font-bold text-slate-400">Products & POS Checkout</span>
+                    </div>
+                    <textarea name="pos_receipt_note" id="pos_receipt_note" rows="3" 
+                              placeholder="e.g. Goods once sold can be exchanged within 7 days with original receipt. No cash refunds. Thank you for shopping with us!" 
+                              class="w-full px-4 py-3 bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:bg-white focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600">{{ old('pos_receipt_note', $setting->pos_receipt_note ?: \App\Models\Setting::defaultPosReceiptNote()) }}</textarea>
+                    <p class="text-[11px] text-slate-500">This note will appear on all printed POS product sales receipts.</p>
+                </div>
+
+                <!-- 2 - Appointment Booking Receipt Notes -->
+                <div class="space-y-2 pt-2 border-t border-slate-100">
+                    <div class="flex items-center justify-between">
+                        <label for="appointment_receipt_note" class="block text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                            <span class="px-1.5 py-0.5 bg-purple-100 text-purple-800 text-[10px] font-mono font-bold">2</span>
+                            <span>Appointment Booking Receipt Note</span>
+                        </label>
+                        <span class="text-[10px] font-bold text-slate-400">Appointments & Services</span>
+                    </div>
+                    <textarea name="appointment_receipt_note" id="appointment_receipt_note" rows="3" 
+                              placeholder="e.g. Appointments are subject to slot availability. Please arrive 10 minutes prior to your scheduled time. Thank you for choosing us!" 
+                              class="w-full px-4 py-3 bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:bg-white focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600">{{ old('appointment_receipt_note', $setting->appointment_receipt_note ?: \App\Models\Setting::defaultAppointmentReceiptNote()) }}</textarea>
+                    <p class="text-[11px] text-slate-500">This note will appear on all printed appointment & salon service booking receipts.</p>
                 </div>
             </div>
         </div>

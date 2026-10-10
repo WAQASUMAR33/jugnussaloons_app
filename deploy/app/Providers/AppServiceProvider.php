@@ -22,6 +22,15 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        \Illuminate\Support\Facades\Gate::before(function ($user, $ability) {
+            if ($user->hasRole('admin')) {
+                return true;
+            }
+            if ($user->hasPermission($ability)) {
+                return true;
+            }
+        });
+
         View::composer('*', function ($view) {
             static $cachedSetting = null;
             if ($cachedSetting === null) {

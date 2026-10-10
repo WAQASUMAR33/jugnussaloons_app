@@ -7,6 +7,7 @@ use App\Models\SaloonService;
 use App\Models\ServiceCategory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use App\Services\ImageUploadService;
 
 class ServiceController extends Controller
 {
@@ -45,7 +46,7 @@ class ServiceController extends Controller
         $validated = $request->validate([
             'service_category_id' => ['nullable', 'exists:service_categories,id'],
             'title' => ['required', 'string', 'max:255'],
-            'description' => ['nullable', 'string', 'max:1000'],
+            'description' => ['nullable', 'string', 'max:5000'],
             'price' => ['required', 'numeric', 'min:0'],
             'discount' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'discounted_price' => ['nullable', 'numeric', 'min:0'],
@@ -65,10 +66,7 @@ class ServiceController extends Controller
 
         $imagePath = null;
         if ($request->hasFile('image')) {
-            $file = $request->file('image');
-            $fileName = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-            $path = $file->storeAs('services', $fileName, 'public');
-            $imagePath = 'storage/' . $path;
+            $imagePath = ImageUploadService::upload($request->file('image'), 'services');
         }
 
         SaloonService::create([
@@ -96,7 +94,7 @@ class ServiceController extends Controller
         $validated = $request->validate([
             'service_category_id' => ['nullable', 'exists:service_categories,id'],
             'title' => ['required', 'string', 'max:255'],
-            'description' => ['nullable', 'string', 'max:1000'],
+            'description' => ['nullable', 'string', 'max:5000'],
             'price' => ['required', 'numeric', 'min:0'],
             'discount' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'discounted_price' => ['nullable', 'numeric', 'min:0'],
@@ -116,14 +114,8 @@ class ServiceController extends Controller
 
         $imagePath = $service->image;
         if ($request->hasFile('image')) {
-            // Remove old image if exists
-            if ($service->image && file_exists(public_path($service->image))) {
-                @unlink(public_path($service->image));
-            }
-            $file = $request->file('image');
-            $fileName = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-            $path = $file->storeAs('services', $fileName, 'public');
-            $imagePath = 'storage/' . $path;
+            ImageUploadService::delete($service->image);
+            $imagePath = ImageUploadService::upload($request->file('image'), 'services');
         }
 
         $service->update([
@@ -148,9 +140,7 @@ class ServiceController extends Controller
      */
     public function destroy(SaloonService $service)
     {
-        if ($service->image && file_exists(public_path($service->image))) {
-            @unlink(public_path($service->image));
-        }
+        ImageUploadService::delete($service->image);
 
         $service->delete();
 

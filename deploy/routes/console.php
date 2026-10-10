@@ -43,10 +43,16 @@ Artisan::command('db:sync-defaults', function () {
         ['slug' => 'admin'],
         ['name' => 'Administrator', 'description' => 'Full system administrator']
     );
-    \App\Models\Role::firstOrCreate(
+    $managerRole = \App\Models\Role::firstOrCreate(
         ['slug' => 'manager'],
         ['name' => 'Manager', 'description' => 'Branch manager']
     );
+
+    // Ensure allow-bill-discount is granted per user directly, not inherited automatically by manager role
+    $discountPerm = \App\Models\Permission::where('slug', 'allow-bill-discount')->first();
+    if ($managerRole && $discountPerm) {
+        $managerRole->permissions()->detach($discountPerm->id);
+    }
 
     // Assign admin role to first user if exists and has no role
     $firstUser = \App\Models\User::first();
@@ -55,5 +61,37 @@ Artisan::command('db:sync-defaults', function () {
         $this->info('✓ Admin role attached to user: ' . $firstUser->email);
     }
 
-    $this->info('=== Database Synchronization Complete! ===');
-})->purpose('Synchronize baseline database categories, defaults, and roles');
+    $this->info('=== Database Synchronization Complete! ===');})->purpose('Synchronize baseline database categories, defaults, and roles');
+
+Artisan::command('gallery:clear', function () {
+    $this->info('Deleting all images from gallery...');
+    $galleries = \App\Models\Gallery::all();
+    $count = $galleries->count();
+
+    foreach ($galleries as $gallery) {
+        \App\Services\ImageUploadService::delete($gallery->image_path);
+        $gallery->delete();
+    }
+
+    // Clean up any remaining files in storage and public galleries directories
+    $directories = [
+        storage_path('app/public/galleries'),
+        public_path('storage/galleries'),
+    ];
+
+    $filesRemoved = 0;
+    foreach ($directories as $dir) {
+        if (\Illuminate\Support\Facades\File::isDirectory($dir)) {
+            $files = \Illuminate\Support\Facades\File::files($dir);
+            foreach ($files as $file) {
+                if ($file->getFilename() !== '.gitignore') {
+                    @\Illuminate\Support\Facades\File::delete($file->getPathname());
+                    $filesRemoved++;
+                }
+            }
+        }
+    }
+
+    $this->info("✓ Successfully deleted all {$count} gallery record(s) and cleared {$filesRemoved} stored image file(s).");
+})->purpose('Delete all gallery photos and their physical files');
+

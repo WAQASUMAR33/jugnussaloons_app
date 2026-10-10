@@ -64,13 +64,36 @@ class User extends Authenticatable
         return $this->belongsToMany(Permission::class, 'permission_user');
     }
 
+    /**
+     * Cached slug arrays — populated once per request, reused for all checks.
+     */
     protected ?array $cachedRoleSlugs = null;
     protected ?array $cachedPermissionSlugs = null;
+
+    /**
+     * Eager-load all auth relationships in ONE query batch.
+     * Call this once per request (in middleware) to avoid N+1 queries
+     * from repeated hasRole() / hasPermission() calls in Blade views.
+     */
+    public function eagerLoadForAuthChecks(): void
+    {
+        if (!$this->relationLoaded('roles')) {
+            $this->load(['roles.permissions', 'permissions']);
+        }
+        // Pre-build the cached slug arrays so subsequent calls are instant
+        $this->getRoleSlugs();
+        $this->getPermissionSlugs();
+    }
 
     protected function getRoleSlugs(): array
     {
         if ($this->cachedRoleSlugs === null) {
-            $this->cachedRoleSlugs = $this->roles()->get()->map(function ($r) {
+            // Use already-loaded relation if available, otherwise load it
+            $roles = $this->relationLoaded('roles')
+                ? $this->roles
+                : $this->roles()->get();
+
+            $this->cachedRoleSlugs = $roles->map(function ($r) {
                 return [strtolower($r->slug ?? ''), strtolower($r->name ?? '')];
             })->flatten()->filter()->values()->all();
         }
@@ -80,12 +103,24 @@ class User extends Authenticatable
     protected function getPermissionSlugs(): array
     {
         if ($this->cachedPermissionSlugs === null) {
-            $direct = $this->permissions()->get()->map(function ($p) {
+            // Use already-loaded relations if available
+            $directPerms = $this->relationLoaded('permissions')
+                ? $this->permissions
+                : $this->permissions()->get();
+
+            $direct = $directPerms->map(function ($p) {
                 return [strtolower($p->slug ?? ''), strtolower($p->name ?? '')];
             })->flatten();
 
-            $viaRoles = $this->roles()->with('permissions')->get()->flatMap(function ($r) {
-                return $r->permissions->map(function ($p) {
+            $roles = $this->relationLoaded('roles')
+                ? $this->roles
+                : $this->roles()->with('permissions')->get();
+
+            $viaRoles = $roles->flatMap(function ($r) {
+                $perms = $r->relationLoaded('permissions')
+                    ? $r->permissions
+                    : $r->permissions()->get();
+                return $perms->map(function ($p) {
                     return [strtolower($p->slug ?? ''), strtolower($p->name ?? '')];
                 })->flatten();
             });
@@ -148,4 +183,24 @@ class User extends Authenticatable
 
         return false;
     }
+
+    /**
+     * Check if user is authorized to give discounts (Admin or direct permission assigned).
+     */
+    public function canGiveDiscount(): bool
+    {
+        if ($this->hasRole('admin')) {
+            return true;
+        }
+
+        if ($this->relationLoaded('permissions')) {
+            return $this->permissions->contains(function ($p) {
+                return strtolower($p->slug ?? '') === 'allow-bill-discount';
+            });
+        }
+
+        return $this->permissions()->where('slug', 'allow-bill-discount')->exists();
+    }
 }
+
+

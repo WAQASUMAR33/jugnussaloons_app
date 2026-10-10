@@ -24,3 +24,7 @@ Homestead.yaml
 Thumbs.db
 *.zip
 /scratch/
+/database/backups/
+/deploy/database/backups/
+/public/uploads/
+/deploy/public/uploads/

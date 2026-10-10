@@ -10,6 +10,8 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::get('/products', [PublicApiController::class, 'products']);
+Route::get('/product-categories', [PublicApiController::class, 'productCategories']);
+Route::get('/product-categories/{id}', [PublicApiController::class, 'showProductCategory']);
 Route::get('/services', [PublicApiController::class, 'services']);
 Route::get('/service-categories', [PublicApiController::class, 'serviceCategories']);
 Route::get('/categories', [PublicApiController::class, 'serviceCategories']);

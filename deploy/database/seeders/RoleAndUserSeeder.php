@@ -26,6 +26,26 @@ class RoleAndUserSeeder extends Seeder
             'description' => 'Access to managerial operations, staff schedules, accounts, payroll, and reports',
         ]);
 
+        $accountantRole = Role::firstOrCreate(['slug' => 'accountant'], [
+            'name' => 'Accountant',
+            'description' => 'Finance, accounts, ledgers, payroll, and expense management',
+        ]);
+
+        $salesPersonRole = Role::firstOrCreate(['slug' => 'sales-person'], [
+            'name' => 'Sales Person',
+            'description' => 'POS sale checkout, product inventory, and billing',
+        ]);
+
+        $receptionistRole = Role::firstOrCreate(['slug' => 'receptionist'], [
+            'name' => 'Receptionist',
+            'description' => 'Appointment bookings, customer directory, and front desk reception',
+        ]);
+
+        $staffRole = Role::firstOrCreate(['slug' => 'staff'], [
+            'name' => 'Staff / Stylist',
+            'description' => 'Salon treatments, services catalog, and staff ratings',
+        ]);
+
         $customerRole = Role::firstOrCreate(['slug' => 'customer'], [
             'name' => 'Customer',
             'description' => 'Standard client access to book saloon services and view appointments',
@@ -36,43 +56,73 @@ class RoleAndUserSeeder extends Seeder
             'description' => 'General user access level',
         ]);
 
-        // 2. Create Permissions
-        $manageUsers = Permission::firstOrCreate(['slug' => 'manage-users'], ['name' => 'Manage Users']);
-        $manageRoles = Permission::firstOrCreate(['slug' => 'manage-roles'], ['name' => 'Manage Roles & Permissions']);
-        $viewReports = Permission::firstOrCreate(['slug' => 'view-reports'], ['name' => 'View Analytics & Reports']);
-        $manageServices = Permission::firstOrCreate(['slug' => 'manage-services'], ['name' => 'Manage Saloon Services']);
-        $manageAppointments = Permission::firstOrCreate(['slug' => 'manage-appointments'], ['name' => 'Manage All Appointments']);
-        $bookAppointment = Permission::firstOrCreate(['slug' => 'book-appointment'], ['name' => 'Book Service Appointment']);
+        // 2. Create Granular Page Permissions
+        $permissionsList = [
+            // Core & Appointments
+            ['slug' => 'manage-appointments', 'name' => 'Appointments Calendar & History'],
+            ['slug' => 'book-appointment', 'name' => 'Book Appointment & Billing'],
+            ['slug' => 'manage-ratings', 'name' => 'Staff Feedback & Ratings'],
+            ['slug' => 'allow-bill-discount', 'name' => 'Allow Bill Discount Authority'],
+            ['slug' => 'approve-discounts', 'name' => 'Approve High Discount Requests (>10%)'],
 
-        // New Permissions for Recent Pages
-        $manageAccounts = Permission::firstOrCreate(['slug' => 'manage-accounts'], ['name' => 'Manage Customer & Party Accounts']);
-        $manageSales = Permission::firstOrCreate(['slug' => 'manage-sales'], ['name' => 'Manage POS & Sales']);
-        $managePurchases = Permission::firstOrCreate(['slug' => 'manage-purchases'], ['name' => 'Manage Supplier Purchases']);
-        $manageExpenses = Permission::firstOrCreate(['slug' => 'manage-expenses'], ['name' => 'Manage Expenses & Categories']);
-        $managePayroll = Permission::firstOrCreate(['slug' => 'manage-payroll'], ['name' => 'Manage Employee Payroll']);
-        $manageSettings = Permission::firstOrCreate(['slug' => 'manage-settings'], ['name' => 'Manage Brand & System Settings']);
-        $manageGallery = Permission::firstOrCreate(['slug' => 'manage-gallery'], ['name' => 'Manage Photo Gallery Showcase']);
-        $allowBillDiscount = Permission::firstOrCreate(['slug' => 'allow-bill-discount'], ['name' => 'Allow Bill Discount']);
+            // Saloon Operations & Treatments
+            ['slug' => 'manage-services', 'name' => 'Treatments & Services Catalog'],
+            ['slug' => 'manage-service-categories', 'name' => 'Service Categories'],
+            ['slug' => 'manage-gallery', 'name' => 'Photo Gallery Showcase'],
+
+            // Products, Inventory & POS
+            ['slug' => 'manage-sales', 'name' => 'POS Sale Checkout'],
+            ['slug' => 'manage-products', 'name' => 'Products Inventory'],
+            ['slug' => 'manage-product-categories', 'name' => 'Product Categories'],
+            ['slug' => 'manage-purchases', 'name' => 'Supplier Purchases'],
+            ['slug' => 'manage-stores', 'name' => 'Store Locations & Branches'],
+            ['slug' => 'manage-store-stocks', 'name' => 'Store-Wise Stock Ledger'],
+            ['slug' => 'manage-stock-transfers', 'name' => 'Stock Transfers Between Stores'],
+
+            // Finance, Ledgers & Payroll
+            ['slug' => 'manage-accounts', 'name' => 'Customer Accounts & Directory'],
+            ['slug' => 'manage-account-categories', 'name' => 'Account Categories'],
+            ['slug' => 'manage-ledger', 'name' => 'General Ledgers'],
+            ['slug' => 'manage-expenses', 'name' => 'Daily Expenses'],
+            ['slug' => 'manage-expense-categories', 'name' => 'Expense Categories'],
+            ['slug' => 'manage-payroll', 'name' => 'Staff Monthly Payroll'],
+            ['slug' => 'manage-payroll-deductions', 'name' => 'Staff Salary Deductions'],
+            ['slug' => 'manage-payroll-advances', 'name' => 'Staff Advance Salary'],
+            ['slug' => 'manage-attendance', 'name' => 'Staff Attendance & Timesheets'],
+            ['slug' => 'manage-commissions', 'name' => 'Commission Management'],
+
+            // Business Reports & Analytics
+            ['slug' => 'view-profit-report', 'name' => 'Profit & Loss Report (P&L)'],
+            ['slug' => 'manage-day-closing', 'name' => 'Daily Day Closing & Cash Reconciliation'],
+            ['slug' => 'view-sales-reports', 'name' => 'Sales Reports'],
+            ['slug' => 'view-stock-reports', 'name' => 'Stock Inventory Reports'],
+            ['slug' => 'view-service-reports', 'name' => 'Services Rendered Reports'],
+            ['slug' => 'view-ledger-reports', 'name' => 'General Ledger Reports'],
+            ['slug' => 'view-purchase-reports', 'name' => 'Supplier Purchases Reports'],
+            ['slug' => 'view-reports', 'name' => 'View All Analytics & Reports'],
+
+            // Settings, Banking & Administration
+            ['slug' => 'manage-settings', 'name' => 'Salon Branding & Invoice Settings'],
+            ['slug' => 'manage-bank-accounts', 'name' => 'Bank Accounts & Digital Vaults'],
+            ['slug' => 'manage-users', 'name' => 'Users & Page Permissions'],
+            ['slug' => 'manage-roles', 'name' => 'Roles & Access Levels'],
+        ];
+
+        $allPermIds = [];
+        foreach ($permissionsList as $p) {
+            $perm = Permission::updateOrCreate(['slug' => $p['slug']], ['name' => $p['name']]);
+            $allPermIds[] = $perm->id;
+        }
 
         // Assign Permissions to Roles
-        $adminRole->permissions()->sync([
-            $manageUsers->id, $manageRoles->id, $viewReports->id, 
-            $manageServices->id, $manageAppointments->id, $bookAppointment->id,
-            $manageAccounts->id, $manageSales->id, $managePurchases->id,
-            $manageExpenses->id, $managePayroll->id, $manageSettings->id, $manageGallery->id,
-            $allowBillDiscount->id
-        ]);
+        $adminRole->permissions()->sync($allPermIds);
 
-        $managerRole->permissions()->sync([
-            $viewReports->id, $manageServices->id, $manageAppointments->id, $bookAppointment->id,
-            $manageAccounts->id, $manageSales->id, $managePurchases->id,
-            $manageExpenses->id, $managePayroll->id, $manageGallery->id,
-            $allowBillDiscount->id
-        ]);
+        $managerPermIds = Permission::whereNotIn('slug', ['manage-users', 'manage-roles', 'view-profit-report', 'manage-day-closing'])->pluck('id')->toArray();
+        $managerRole->permissions()->sync($managerPermIds);
 
-        $customerRole->permissions()->sync([
-            $bookAppointment->id
-        ]);
+        $customerRole->permissions()->sync(
+            Permission::whereIn('slug', ['book-appointment', 'manage-appointments'])->pluck('id')->toArray()
+        );
 
         // 3. Create Seeded Admin User
         $admin = User::firstOrCreate(

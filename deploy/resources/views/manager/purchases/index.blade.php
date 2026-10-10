@@ -18,6 +18,19 @@
         { product_id: '', search_term: '', open: false, quantity: 1, unit_price: 0, sale_price: 0, subtotal: 0 }
     ],
     paidAmount: 0,
+    printablePurchase: null,
+
+    printPurchaseBill(purchase) {
+        if (!purchase) return;
+        this.printablePurchase = purchase;
+        this.$nextTick(() => {
+            document.body.classList.add('purchase-report-active');
+            window.print();
+            setTimeout(() => {
+                document.body.classList.remove('purchase-report-active');
+            }, 1200);
+        });
+    },
 
     getProductStoreStock(prod, storeId) {
         if (!prod) return 0;
@@ -178,15 +191,28 @@
                             {{ number_format($purchase->balance_due, 2) }}
                         </td>
                         <td class="py-4 px-6 text-right">
-                            <button @click="selectedPurchase = {{ json_encode($purchase) }}; viewModalOpen = true" 
-                                    class="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs">
-                                View Items ({{ $purchase->items->count() }})
-                            </button>
+                            <div class="flex items-center justify-end gap-1.5">
+                                <button type="button" @click="printPurchaseBill({{ json_encode($purchase) }})" 
+                                        class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-2xs transition-colors cursor-pointer"
+                                        title="Print Official Purchase Bill Report">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
+                                    <span>Print</span>
+                                </button>
+                                <a href="{{ route('manager.purchases.print', $purchase->id) }}" target="_blank"
+                                   class="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 transition-colors"
+                                   title="Open Purchase Bill Report in new tab">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                                </a>
+                                <button @click="selectedPurchase = {{ json_encode($purchase) }}; viewModalOpen = true" 
+                                        class="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs border border-amber-200 cursor-pointer">
+                                    Items ({{ $purchase->items->count() }})
+                                </button>
+                            </div>
                         </td>
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="7" class="py-12 text-center text-slate-400">
+                        <td colspan="8" class="py-12 text-center text-slate-400">
                             <p class="text-sm font-semibold">No purchase records found.</p>
                         </td>
                     </tr>
@@ -460,13 +486,227 @@
                 </div>
             </div>
 
-            <div class="pt-4 flex justify-end border-t border-slate-100">
-                <button type="button" @click="viewModalOpen = false" class="px-5 py-2 bg-slate-900 text-white font-bold text-xs">
+            <div class="pt-4 flex items-center justify-between border-t border-slate-100">
+                <button type="button" @click="printPurchaseBill(selectedPurchase)" 
+                        class="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
+                    <span>Print Bill Report</span>
+                </button>
+                <button type="button" @click="viewModalOpen = false" class="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs">
                     Close
                 </button>
             </div>
         </div>
     </div>
 
+    <!-- DEDICATED OFFICIAL PURCHASE BILL REPORT (PRINT ENGINE) -->
+    <div id="purchaseReportPrintContainer" class="hidden print:block crystal-container">
+        <template x-if="printablePurchase">
+            <div>
+                <!-- Top Company Brand Header -->
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        @if(isset($appSetting) && $appSetting->brand_logo)
+                            <img src="{{ asset($appSetting->brand_logo) }}" class="h-12 w-auto object-contain">
+                        @endif
+                        <div>
+                            <h1 class="text-xl font-black uppercase text-slate-900 tracking-tight">{{ $appSetting->brand_name ?? 'Jugnu Saloon' }}</h1>
+                            @if(isset($appSetting) && $appSetting->brand_slogan)
+                                <p class="text-[10px] font-bold text-slate-600 italic leading-none">{{ $appSetting->brand_slogan }}</p>
+                            @endif
+                            @if(isset($appSetting) && $appSetting->brand_address)
+                                <p class="text-[9px] text-slate-500 mt-0.5 leading-tight">{{ $appSetting->brand_address }}</p>
+                            @endif
+                            @if(isset($appSetting) && ($appSetting->brand_phone1 || $appSetting->brand_phone2))
+                                <p class="text-[9px] font-bold text-slate-700 mt-0.5">
+                                    Tel: {{ implode(' | ', array_filter([$appSetting->brand_phone1, $appSetting->brand_phone2])) }}
+                                </p>
+                            @endif
+                        </div>
+                    </div>
+                    <div class="text-right text-[8.5pt]">
+                        <div class="font-bold text-slate-800 uppercase tracking-wide">Procurement & Purchases</div>
+                        <div class="text-[7.5pt] text-slate-500">Official Purchase Bill & Goods Inward Note</div>
+                        <div class="text-[7.5pt] font-semibold text-slate-600 mt-0.5">Doc ID: <span x-text="printablePurchase.invoice_no"></span></div>
+                    </div>
+                </div>
+
+                <!-- Double Divider Rule -->
+                <div class="crystal-double-rule"></div>
+
+                <!-- Title Banner -->
+                <div class="crystal-title-banner">
+                    <h2>GOODS PURCHASE INVOICE & RECEIVING REPORT</h2>
+                    <p>Official Vendor Accounts Payable & Stock Inward Record</p>
+                </div>
+
+                <!-- Crystal Reports Parameters Matrix -->
+                <table class="crystal-param-grid">
+                    <tr>
+                        <td class="label">Invoice No:</td>
+                        <td class="val font-mono font-bold text-slate-900" x-text="printablePurchase.invoice_no"></td>
+                        <td class="label">Purchase Date:</td>
+                        <td class="val font-mono" x-text="printablePurchase.purchase_date ? printablePurchase.purchase_date.substring(0, 10) : ''"></td>
+                    </tr>
+                    <tr>
+                        <td class="label">Supplier Account:</td>
+                        <td class="val font-bold">
+                            <span x-text="printablePurchase.supplier ? printablePurchase.supplier.name : 'N/A'"></span>
+                            <template x-if="printablePurchase.supplier && printablePurchase.supplier.category">
+                                <span class="text-[8.5pt] font-normal text-slate-600" x-text="'(' + (printablePurchase.supplier.category.title || printablePurchase.supplier.category.name) + ')'"></span>
+                            </template>
+                        </td>
+                        <td class="label">Supplier Tel:</td>
+                        <td class="val font-mono" x-text="printablePurchase.supplier ? (printablePurchase.supplier.phone_no1 || printablePurchase.supplier.phone_no2 || '—') : '—'"></td>
+                    </tr>
+                    <tr>
+                        <td class="label">Destination Store:</td>
+                        <td class="val font-bold text-slate-800">
+                            🏬 <span x-text="printablePurchase.store ? printablePurchase.store.name : 'Main Store'"></span>
+                            <template x-if="printablePurchase.store && printablePurchase.store.code">
+                                <span class="text-[8.5pt] font-mono font-normal" x-text="'(' + printablePurchase.store.code + ')'"></span>
+                            </template>
+                        </td>
+                        <td class="label">Payment Status:</td>
+                        <td class="val">
+                            <template x-if="parseFloat(printablePurchase.balance_due) <= 0">
+                                <span class="font-bold text-emerald-800 uppercase">PAID / SETTLED IN FULL</span>
+                            </template>
+                            <template x-if="parseFloat(printablePurchase.balance_due) > 0 && parseFloat(printablePurchase.paid_amount) > 0">
+                                <span class="font-bold text-amber-800 uppercase">PARTIALLY PAID</span>
+                            </template>
+                            <template x-if="parseFloat(printablePurchase.balance_due) > 0 && parseFloat(printablePurchase.paid_amount) <= 0">
+                                <span class="font-bold text-rose-800 uppercase">UNPAID / OUTSTANDING</span>
+                            </template>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="label">Gross Bill Amount:</td>
+                        <td class="val font-mono font-bold" x-text="'PKR ' + Number(printablePurchase.total_amount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></td>
+                        <td class="label">Amount Paid:</td>
+                        <td class="val font-mono font-bold text-emerald-800" x-text="'PKR ' + Number(printablePurchase.paid_amount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></td>
+                    </tr>
+                    <tr>
+                        <td class="label">Balance Due / Payable:</td>
+                        <td class="val font-mono font-bold" 
+                            :class="parseFloat(printablePurchase.balance_due) > 0 ? 'text-rose-800' : 'text-slate-800'"
+                            x-text="'PKR ' + Number(printablePurchase.balance_due).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></td>
+                        <td class="label">Generated By:</td>
+                        <td class="val">{{ Auth::user()->name }} | {{ now()->format('d-M-Y h:i A') }}</td>
+                    </tr>
+                    <template x-if="printablePurchase.notes">
+                        <tr>
+                            <td class="label">Notes / Remarks:</td>
+                            <td colspan="3" class="val italic text-slate-700" x-text="printablePurchase.notes"></td>
+                        </tr>
+                    </template>
+                </table>
+
+                <!-- Purchase Line Items Table -->
+                <div class="mt-4">
+                    <table class="crystal-grid">
+                        <thead>
+                            <tr>
+                                <th class="w-10 text-center">Sr #</th>
+                                <th class="text-left">Product / Item Description</th>
+                                <th class="text-left w-36">Category</th>
+                                <th class="text-center w-20">Received Qty</th>
+                                <th class="text-right w-28">Purchase Rate</th>
+                                <th class="text-right w-28">Retail Sale Rate</th>
+                                <th class="text-right w-32">Subtotal Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="(item, index) in printablePurchase.items" :key="item.id || index">
+                                <tr>
+                                    <td class="text-center font-mono" x-text="index + 1"></td>
+                                    <td class="font-bold text-slate-900" x-text="item.product ? item.product.title : 'Unknown Product'"></td>
+                                    <td class="text-slate-600" x-text="item.product && item.product.category ? (item.product.category.title || item.product.category.name) : 'General'"></td>
+                                    <td class="text-center font-bold font-mono text-slate-900" x-text="item.quantity"></td>
+                                    <td class="text-right font-mono" x-text="'PKR ' + Number(item.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></td>
+                                    <td class="text-right font-mono text-slate-700" x-text="'PKR ' + Number(item.product ? item.product.price : 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></td>
+                                    <td class="text-right font-mono font-bold text-slate-900" x-text="'PKR ' + Number(item.subtotal).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td colspan="3" class="text-right uppercase font-black">Total Quantity & Bill Summary:</td>
+                                <td class="text-center font-mono font-black" x-text="printablePurchase.items ? printablePurchase.items.reduce((sum, it) => sum + parseInt(it.quantity || 0), 0) + ' units' : '—'"></td>
+                                <td colspan="2" class="text-right uppercase font-bold text-slate-600">Grand Total:</td>
+                                <td class="text-right font-mono font-black" x-text="'PKR ' + Number(printablePurchase.total_amount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></td>
+                            </tr>
+                            <template x-if="parseFloat(printablePurchase.paid_amount) > 0">
+                                <tr>
+                                    <td colspan="6" class="text-right uppercase font-bold text-emerald-800">Total Amount Paid:</td>
+                                    <td class="text-right font-mono font-black text-emerald-800" x-text="'PKR ' + Number(printablePurchase.paid_amount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></td>
+                                </tr>
+                            </template>
+                            <tr>
+                                <td colspan="6" class="text-right uppercase font-bold"
+                                    :class="parseFloat(printablePurchase.balance_due) > 0 ? 'text-rose-800' : 'text-slate-800'">Net Outstanding Balance Due:</td>
+                                <td class="text-right font-mono font-black" 
+                                    :class="parseFloat(printablePurchase.balance_due) > 0 ? 'text-rose-800' : 'text-slate-800'"
+                                    x-text="'PKR ' + Number(printablePurchase.balance_due).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+
+                <!-- Official Signatures Section -->
+                <div class="crystal-sign-band">
+                    <div class="crystal-sign-box">
+                        <div>Received By</div>
+                        <div class="text-[7pt] text-slate-500 font-normal">Store Incharge / Keeper</div>
+                    </div>
+                    <div class="crystal-sign-box">
+                        <div>Audited & Verified By</div>
+                        <div class="text-[7pt] text-slate-500 font-normal">Internal Audit / Accounts</div>
+                    </div>
+                    <div class="crystal-sign-box">
+                        <div>Supplier / Vendor Sign</div>
+                        <div class="text-[7pt] text-slate-500 font-normal">Delivery Representative</div>
+                    </div>
+                    <div class="crystal-sign-box">
+                        <div>Authorized Signature</div>
+                        <div class="text-[7pt] text-slate-500 font-normal">General Manager / Owner</div>
+                    </div>
+                </div>
+
+                <!-- Audit Footer -->
+                <div class="crystal-audit-footer">
+                    <span>System Generated Official Purchase Bill • Verification Ref: <span x-text="printablePurchase.invoice_no"></span></span>
+                    <span>Printed by {{ Auth::user()->name }} on {{ now()->format('d-M-Y h:i:s A') }}</span>
+                </div>
+
+            </div>
+        </template>
+    </div>
+
 </div>
+
+<style>
+@media print {
+    body.purchase-report-active {
+        background: #ffffff !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    body.purchase-report-active * {
+        visibility: hidden !important;
+    }
+    body.purchase-report-active #purchaseReportPrintContainer,
+    body.purchase-report-active #purchaseReportPrintContainer * {
+        visibility: visible !important;
+    }
+    body.purchase-report-active #purchaseReportPrintContainer {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        display: block !important;
+        background: #ffffff !important;
+    }
+}
+</style>
 @endsection

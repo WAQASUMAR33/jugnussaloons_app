@@ -22,6 +22,7 @@ class DatabaseSeeder extends Seeder
             PurchaseAndSaleSeeder::class,
             AppointmentSeeder::class,
             GallerySeeder::class,
+            ComprehensiveSalonDataSeeder::class,
         ]);
     }
 }

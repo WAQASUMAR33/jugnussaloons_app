@@ -14,6 +14,12 @@ use App\Models\SaloonService;
 use App\Models\ServiceCategory;
 use App\Models\Store;
 use App\Models\ProductStoreStock;
+use App\Models\Expense;
+use App\Models\ExpenseCategory;
+use App\Models\Payroll;
+use App\Models\SalaryAdvance;
+use App\Models\DayClosing;
+use App\Models\BankAccount;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -67,26 +73,30 @@ class ReportController extends Controller
         $categoryBreakdown = DB::table('sales')
             ->join('accounts', 'sales.account_id', '=', 'accounts.id')
             ->join('account_categories', 'accounts.account_category_id', '=', 'account_categories.id')
-            ->whereBetween('sales.sale_date', [$startDate, $endDate])
+            ->whereBetween('sales.sale_date', [$startDate, $endDate]);
+
+        if ($categoryId) {
+            $categoryBreakdown->where('accounts.account_category_id', $categoryId);
+        }
+
+        $categoryBreakdown = $categoryBreakdown
             ->select(
                 'account_categories.title as category_title',
                 DB::raw('COUNT(sales.id) as total_count'),
                 DB::raw('SUM(sales.total_amount) as gross_amount'),
                 DB::raw('SUM(sales.discount) as discount_amount'),
-        $invoicesCount = (clone $query)->count();
-
-        // Payment mode breakdown
-        $paymentModesBreakdown = (clone $query)
-            ->select('payment_mode', DB::raw('COUNT(id) as count'), DB::raw('SUM(total_amount) as total'))
-            ->groupBy('payment_mode')
+                DB::raw('SUM(sales.received_amount) as received_amount'),
+                DB::raw('SUM(sales.balance_due) as balance_due')
+            )
+            ->groupBy('account_categories.id', 'account_categories.title')
             ->get();
 
-        $stores = Store::where('is_active', true)->orderBy('name')->get();
+        $accountCategories = AccountCategory::orderBy('title')->get();
 
         return view('manager.reports.sales', compact(
-            'sales', 'startDate', 'endDate', 'stores', 'storeId',
-            'totalSalesAmount', 'totalDiscount', 'totalReceived',
-            'totalBalanceDue', 'invoicesCount', 'paymentModesBreakdown'
+            'sales', 'startDate', 'endDate', 'categoryId', 'accountCategories',
+            'totalSalesCount', 'totalGrossAmount', 'totalDiscount', 'totalNetAmount',
+            'totalReceived', 'totalBalanceDue', 'categoryBreakdown', 'datewiseBreakdown', 'reportType'
         ));
     }
 
@@ -285,11 +295,12 @@ class ReportController extends Controller
     public function ledger(Request $request)
     {
         $accountId = $request->input('account_id');
+        $type = $request->input('type');
         $startDate = $request->input('start_date', now()->startOfMonth()->toDateString());
         $endDate = $request->input('end_date', now()->toDateString());
 
         $accounts = Account::with('category')->orderBy('name')->get();
-        $selectedAccount = $accountId ? Account::with('category')->find($accountId) : $accounts->first();
+        $selectedAccount = $accountId ? Account::with('category')->find($accountId) : null;
 
         $ledgers = collect();
         $totalDebit = 0;
@@ -307,17 +318,50 @@ class ReportController extends Controller
             $openingBalance = $priorLedger ? $priorLedger->running_balance : 0;
 
             $ledgerQuery = AccountLedger::where('account_id', $selectedAccount->id)
-                ->whereBetween('date', [$startDate, $endDate])
-                ->orderBy('date', 'asc')
-                ->orderBy('id', 'asc');
+                ->whereBetween('date', [$startDate, $endDate]);
+
+            if ($type) {
+                $ledgerQuery->where('type', $type);
+            }
+
+            $ledgerQuery->orderBy('date', 'asc')->orderBy('id', 'asc');
 
             $ledgers = $ledgerQuery->paginate(30)->withQueryString();
-            $totalDebit = AccountLedger::where('account_id', $selectedAccount->id)->whereBetween('date', [$startDate, $endDate])->sum('debit');
-            $totalCredit = AccountLedger::where('account_id', $selectedAccount->id)->whereBetween('date', [$startDate, $endDate])->sum('credit');
+
+            $debitQuery = AccountLedger::where('account_id', $selectedAccount->id)->whereBetween('date', [$startDate, $endDate]);
+            $creditQuery = AccountLedger::where('account_id', $selectedAccount->id)->whereBetween('date', [$startDate, $endDate]);
+            if ($type) {
+                $debitQuery->where('type', $type);
+                $creditQuery->where('type', $type);
+            }
+            $totalDebit = $debitQuery->sum('debit');
+            $totalCredit = $creditQuery->sum('credit');
+        } else {
+            // Consolidated ledger across all accounts
+            $ledgerQuery = AccountLedger::with(['account.category'])
+                ->whereBetween('date', [$startDate, $endDate]);
+
+            if ($type) {
+                $ledgerQuery->where('type', $type);
+            }
+
+            $ledgerQuery->orderBy('date', 'desc')->orderBy('id', 'desc');
+
+            $ledgers = $ledgerQuery->paginate(30)->withQueryString();
+
+            $debitQuery = AccountLedger::whereBetween('date', [$startDate, $endDate]);
+            $creditQuery = AccountLedger::whereBetween('date', [$startDate, $endDate]);
+            if ($type) {
+                $debitQuery->where('type', $type);
+                $creditQuery->where('type', $type);
+            }
+            $totalDebit = $debitQuery->sum('debit');
+            $totalCredit = $creditQuery->sum('credit');
+            $openingBalance = 0;
         }
 
         return view('manager.reports.ledger', compact(
-            'accounts', 'selectedAccount', 'startDate', 'endDate',
+            'accounts', 'selectedAccount', 'accountId', 'type', 'startDate', 'endDate',
             'ledgers', 'openingBalance', 'totalDebit', 'totalCredit'
         ));
     }
@@ -384,10 +428,396 @@ class ReportController extends Controller
               ->orWhere('title', 'like', '%Vendor%');
         })->orderBy('name')->get();
 
+        if ($suppliers->isEmpty()) {
+            $suppliers = Account::where('type', 'supplier')->orderBy('name')->get();
+            if ($suppliers->isEmpty()) {
+                $suppliers = Account::orderBy('name')->get();
+            }
+        }
+
         return view('manager.reports.purchases', compact(
             'purchases', 'startDate', 'endDate', 'accountId', 'suppliers',
             'totalPurchaseOrders', 'totalPurchaseAmount', 'totalPaidAmount', 'totalBalanceDue',
             'datewiseBreakdown', 'accountwiseBreakdown', 'reportType'
         ));
+    }
+
+    /**
+     * 6. Profit & Loss Report (Products, Services & Overall Net Profit between dates)
+     */
+    public function profit(Request $request)
+    {
+        if (!auth()->user()->hasRole('admin')) {
+            abort(403, 'Unauthorized. Profit & Loss Report is restricted to Administrators only.');
+        }
+
+        $startDate = $request->input('start_date', now()->startOfMonth()->toDateString());
+        $endDate = $request->input('end_date', now()->toDateString());
+
+        // -------------------------------------------------------------
+        // A. PRODUCTS PROFIT CALCULATION
+        // Rules:
+        // total Sales amount
+        // total purchase amount
+        // product profit = total sales amount - total purchase amount
+        // -------------------------------------------------------------
+        $salesQuery = Sale::with(['customer', 'store'])
+            ->whereBetween('sale_date', [$startDate, $endDate]);
+        
+        $totalSalesAmount = (float) (clone $salesQuery)->sum('total_amount');
+        $totalSalesDiscount = (float) (clone $salesQuery)->sum('discount');
+        $totalSalesNetAmount = $totalSalesAmount - $totalSalesDiscount;
+        $totalSalesReceived = (float) (clone $salesQuery)->sum('received_amount');
+        $salesCount = (clone $salesQuery)->count();
+        $salesList = (clone $salesQuery)->orderBy('sale_date', 'desc')->orderBy('id', 'desc')->take(50)->get();
+
+        $purchasesQuery = Purchase::with(['supplier'])
+            ->whereBetween('purchase_date', [$startDate, $endDate]);
+
+        $totalPurchaseAmount = (float) (clone $purchasesQuery)->sum('total_amount');
+        $totalPurchasePaid = (float) (clone $purchasesQuery)->sum('paid_amount');
+        $purchasesCount = (clone $purchasesQuery)->count();
+        $purchasesList = (clone $purchasesQuery)->orderBy('purchase_date', 'desc')->orderBy('id', 'desc')->take(50)->get();
+
+        // Product Profit as defined by rule: total sales amount - total purchase amount
+        $productProfit = $totalSalesAmount - $totalPurchaseAmount;
+
+        // -------------------------------------------------------------
+        // B. SERVICES PROFIT CALCULATION
+        // Rules:
+        // total Services amount
+        // total expenses
+        // total Salaries Paid
+        // services profit = total services amount - (total expenses + total salaries paid)
+        // -------------------------------------------------------------
+        $appointmentsQuery = Appointment::with(['customer', 'employee'])
+            ->whereBetween('appointment_date', [$startDate, $endDate]);
+
+        $totalServicesGrossAmount = (float) (clone $appointmentsQuery)->sum('total_amount');
+        $totalServicesDiscount = (float) (clone $appointmentsQuery)->sum('discount');
+        $totalServicesAmount = (float) (clone $appointmentsQuery)->sum('net_amount');
+        $appointmentsCount = (clone $appointmentsQuery)->count();
+        $appointmentsList = (clone $appointmentsQuery)->orderBy('appointment_date', 'desc')->orderBy('id', 'desc')->take(50)->get();
+
+        $expensesQuery = Expense::with(['category', 'creator'])
+            ->whereDate('created_at', '>=', $startDate)
+            ->whereDate('created_at', '<=', $endDate);
+
+        $totalExpenses = (float) (clone $expensesQuery)->sum('amount');
+        $expensesCount = (clone $expensesQuery)->count();
+        $expensesList = (clone $expensesQuery)->orderBy('created_at', 'desc')->take(50)->get();
+
+        // Expense category breakdown
+        $expenseCategoryBreakdown = Expense::whereDate('created_at', '>=', $startDate)
+            ->whereDate('created_at', '<=', $endDate)
+            ->select('exp_category_id', DB::raw('SUM(amount) as total_amount'), DB::raw('COUNT(*) as count'))
+            ->with('category')
+            ->groupBy('exp_category_id')
+            ->orderBy('total_amount', 'desc')
+            ->get();
+
+        // Salaries Paid:
+        // 1) Paid payrolls with payment_date in range (or updated_at if null)
+        $paidPayrollsQuery = Payroll::with(['employee'])
+            ->where('status', 'paid')
+            ->where(function($q) use ($startDate, $endDate) {
+                $q->whereBetween('payment_date', [$startDate, $endDate])
+                  ->orWhere(function($sub) use ($startDate, $endDate) {
+                      $sub->whereNull('payment_date')
+                          ->whereDate('updated_at', '>=', $startDate)
+                          ->whereDate('updated_at', '<=', $endDate);
+                  });
+            });
+        $totalPaidPayrollAmount = (float) (clone $paidPayrollsQuery)->sum('net_salary');
+        $paidPayrollsList = (clone $paidPayrollsQuery)->get();
+
+        // 2) Salary Advances paid in range
+        $advancesQuery = SalaryAdvance::with(['employee'])
+            ->whereBetween('advance_date', [$startDate, $endDate]);
+        $totalAdvancesAmount = (float) (clone $advancesQuery)->sum('amount');
+        $advancesList = (clone $advancesQuery)->get();
+
+        // Total Salaries Paid = Paid Payrolls + Direct Advances
+        $totalSalariesPaid = $totalPaidPayrollAmount + $totalAdvancesAmount;
+
+        // Services Profit as defined by rule: total services amount - (total expenses + total salaries paid)
+        $servicesProfit = $totalServicesAmount - ($totalExpenses + $totalSalariesPaid);
+
+        // -------------------------------------------------------------
+        // C. NET PROFIT CALCULATION
+        // Rule: Net Profit = product profit + services profit
+        // -------------------------------------------------------------
+        $netProfit = $productProfit + $servicesProfit;
+
+        // High-level aggregates
+        $totalRevenue = $totalSalesAmount + $totalServicesAmount;
+        $totalCosts = $totalPurchaseAmount + $totalExpenses + $totalSalariesPaid;
+        $profitMargin = $totalRevenue > 0 ? round(($netProfit / $totalRevenue) * 100, 2) : 0;
+
+        return view('manager.reports.profit', compact(
+            'startDate', 'endDate',
+            // Products
+            'totalSalesAmount', 'totalSalesDiscount', 'totalSalesNetAmount', 'totalSalesReceived', 'salesCount', 'salesList',
+            'totalPurchaseAmount', 'totalPurchasePaid', 'purchasesCount', 'purchasesList',
+            'productProfit',
+            // Services
+            'totalServicesGrossAmount', 'totalServicesDiscount', 'totalServicesAmount', 'appointmentsCount', 'appointmentsList',
+            'totalExpenses', 'expensesCount', 'expensesList', 'expenseCategoryBreakdown',
+            'totalSalariesPaid', 'totalPaidPayrollAmount', 'totalAdvancesAmount', 'paidPayrollsList', 'advancesList',
+            'servicesProfit',
+            // Net
+            'netProfit', 'totalRevenue', 'totalCosts', 'profitMargin'
+        ));
+    }
+
+    /**
+     * 7. Daily Day Closing Report & Cash/Bank Reconciliation
+     * Calculates Opening Balance, All Inflows (Receivings), All Outflows (Payments)
+     * broken down into Cash and Bank, with Net Flows, Closing Balances, and Drawer Reconciliation.
+     */
+    public function dayClosing(Request $request)
+    {
+        if (!auth()->user()->hasRole('admin')) {
+            abort(403, 'Unauthorized. Daily Day Closing Report is restricted to Administrators only.');
+        }
+
+        $date = $request->input('date', now()->toDateString());
+
+        // -------------------------------------------------------------
+        // 1. OPENING BALANCE (Set to 0.00 in all cases as required)
+        // -------------------------------------------------------------
+        $openingCash = 0.0;
+        $openingBank = 0.0;
+        $totalOpening = 0.0;
+
+        // -------------------------------------------------------------
+        // 2. DAILY RECEIVINGS ON SELECTED DATE (INFLOWS)
+        // -------------------------------------------------------------
+        // Appointments
+        $allAppointments = Appointment::with(['customer', 'employee'])
+            ->where('appointment_date', $date)
+            ->where('paid_amount', '>', 0)
+            ->get();
+
+        $cashAptTotal = 0.0;
+        $bankAptTotal = 0.0;
+        foreach ($allAppointments as $a) {
+            $mode = strtolower(trim($a->payment_mode ?? ''));
+            if ($mode === 'split' && !empty($a->split_payments)) {
+                $splits = is_array($a->split_payments) ? $a->split_payments : json_decode($a->split_payments, true);
+                $cashAptTotal += (float) (($splits['Cash'] ?? 0) + ($splits['Other'] ?? 0));
+                $bankAptTotal += (float) (($splits['Bank'] ?? 0) + ($splits['Card'] ?? 0));
+            } elseif (in_array($mode, ['bank', 'card', 'bank transfer', 'online'])) {
+                $bankAptTotal += (float) $a->paid_amount;
+            } else {
+                $cashAptTotal += (float) $a->paid_amount;
+            }
+        }
+        $totalAptReceived = $cashAptTotal + $bankAptTotal;
+
+        // Product Sales
+        $allSales = Sale::with(['customer', 'store'])
+            ->where('sale_date', $date)
+            ->where('received_amount', '>', 0)
+            ->get();
+
+        $cashSalesTotal = 0.0;
+        $bankSalesTotal = 0.0;
+        foreach ($allSales as $s) {
+            $mode = strtolower(trim($s->payment_mode ?? ''));
+            if ($mode === 'split' && !empty($s->split_payments)) {
+                $splits = is_array($s->split_payments) ? $s->split_payments : json_decode($s->split_payments, true);
+                $cashSalesTotal += (float) (($splits['Cash'] ?? 0) + ($splits['Other'] ?? 0));
+                $bankSalesTotal += (float) (($splits['Bank'] ?? 0) + ($splits['Card'] ?? 0));
+            } elseif (in_array($mode, ['bank', 'card', 'bank transfer', 'online'])) {
+                $bankSalesTotal += (float) $s->received_amount;
+            } elseif ($mode !== 'issue stock') {
+                $cashSalesTotal += (float) $s->received_amount;
+            }
+        }
+        $totalSalesReceived = $cashSalesTotal + $bankSalesTotal;
+
+        // Direct Customer Receivings (from ledger, not ending in -REC)
+        $directReceivings = AccountLedger::with('account')
+            ->where('date', $date)
+            ->where('type', 'receiving')
+            ->where('reference_no', 'not like', '%-REC%')
+            ->get();
+        $cashDirectReceivingTotal = (float) $directReceivings->sum('credit');
+        $bankDirectReceivingTotal = 0.0;
+        $totalDirectReceivings = $cashDirectReceivingTotal + $bankDirectReceivingTotal;
+
+        // Aggregated Receivings
+        $totalCashReceived = $cashAptTotal + $cashSalesTotal + $cashDirectReceivingTotal;
+        $totalBankReceived = $bankAptTotal + $bankSalesTotal + $bankDirectReceivingTotal;
+        $totalReceived = $totalCashReceived + $totalBankReceived;
+
+        // -------------------------------------------------------------
+        // 3. DAILY PAYMENTS ON SELECTED DATE (OUTFLOWS)
+        // -------------------------------------------------------------
+        // Operational Expenses
+        $expenses = Expense::with(['category', 'creator'])
+            ->whereDate('created_at', $date)
+            ->get();
+        $totalExpensesCash = (float) $expenses->sum('amount');
+        $totalExpensesBank = 0.0;
+        $totalExpenses = $totalExpensesCash + $totalExpensesBank;
+
+        // Purchases Paid
+        $purchases = Purchase::with(['supplier', 'store'])
+            ->where('purchase_date', $date)
+            ->where('paid_amount', '>', 0)
+            ->get();
+        $totalPurchasesCash = (float) $purchases->sum('paid_amount');
+        $totalPurchasesBank = 0.0;
+        $totalPurchases = $totalPurchasesCash + $totalPurchasesBank;
+
+        // Payroll Salaries Paid
+        $payrolls = Payroll::with('employee')
+            ->where('payment_date', $date)
+            ->where('status', 'paid')
+            ->get();
+        $totalPayrollCash = (float) $payrolls->sum('net_salary');
+        $totalPayrollBank = 0.0;
+        $totalPayroll = $totalPayrollCash + $totalPayrollBank;
+
+        // Salary Advances Disbursed
+        $advances = SalaryAdvance::with(['employee', 'bankAccount'])
+            ->where('advance_date', $date)
+            ->get();
+        $cashAdvances = $advances->filter(fn($a) => strtolower($a->payment_mode ?? '') !== 'bank transfer');
+        $bankAdvances = $advances->filter(fn($a) => strtolower($a->payment_mode ?? '') === 'bank transfer');
+        $totalAdvancesCash = (float) $cashAdvances->sum('amount');
+        $totalAdvancesBank = (float) $bankAdvances->sum('amount');
+        $totalAdvances = $totalAdvancesCash + $totalAdvancesBank;
+
+        // Direct Ledger Payments (not -PAY, not ADV-SAL-, not PAYROLL-)
+        $directPayments = AccountLedger::with('account')
+            ->where('date', $date)
+            ->where('type', 'payment')
+            ->where('reference_no', 'not like', '%-PAY%')
+            ->where('reference_no', 'not like', 'ADV-SAL-%')
+            ->where('reference_no', 'not like', 'PAYROLL-%')
+            ->get();
+        $totalDirectPaymentsCash = (float) $directPayments->sum('credit');
+        $totalDirectPaymentsBank = 0.0;
+        $totalDirectPayments = $totalDirectPaymentsCash + $totalDirectPaymentsBank;
+
+        // Aggregated Payments
+        $totalCashPaid = $totalExpensesCash + $totalPurchasesCash + $totalPayrollCash + $totalAdvancesCash + $totalDirectPaymentsCash;
+        $totalBankPaid = $totalExpensesBank + $totalPurchasesBank + $totalPayrollBank + $totalAdvancesBank + $totalDirectPaymentsBank;
+        $totalPaid = $totalCashPaid + $totalBankPaid;
+
+        // -------------------------------------------------------------
+        // 4. NET MOVEMENT & CLOSING BALANCES
+        // -------------------------------------------------------------
+        $netCashFlow = $totalCashReceived - $totalCashPaid;
+        $netBankFlow = $totalBankReceived - $totalBankPaid;
+        $totalNetFlow = $totalReceived - $totalPaid;
+
+        $closingCashExpected = $openingCash + $netCashFlow;
+        $closingBankExpected = $openingBank + $netBankFlow;
+        $closingTotalExpected = $totalOpening + $totalNetFlow;
+
+        // -------------------------------------------------------------
+        // 5. SAVED CLOSING RECORD & PHYSICAL RECONCILIATION
+        // -------------------------------------------------------------
+        $dayClosing = DayClosing::with('closedBy')->where('closing_date', $date)->first();
+
+        // Bank Accounts list for Bank Breakdown tab
+        $bankAccounts = BankAccount::where('is_active', true)->get();
+
+        $appSetting = \App\Models\Setting::first();
+
+        return view('manager.reports.day_closing', compact(
+            'date',
+            // Opening
+            'openingCash', 'openingBank', 'totalOpening',
+            // Receivings
+            'cashAptTotal', 'bankAptTotal', 'totalAptReceived', 'allAppointments',
+            'cashSalesTotal', 'bankSalesTotal', 'totalSalesReceived', 'allSales',
+            'cashDirectReceivingTotal', 'bankDirectReceivingTotal', 'totalDirectReceivings', 'directReceivings',
+            'totalCashReceived', 'totalBankReceived', 'totalReceived',
+            // Payments
+            'expenses', 'totalExpensesCash', 'totalExpensesBank', 'totalExpenses',
+            'purchases', 'totalPurchasesCash', 'totalPurchasesBank', 'totalPurchases',
+            'payrolls', 'totalPayrollCash', 'totalPayrollBank', 'totalPayroll',
+            'advances', 'cashAdvances', 'bankAdvances', 'totalAdvancesCash', 'totalAdvancesBank', 'totalAdvances',
+            'directPayments', 'totalDirectPaymentsCash', 'totalDirectPaymentsBank', 'totalDirectPayments',
+            'totalCashPaid', 'totalBankPaid', 'totalPaid',
+            // Net & Closing
+            'netCashFlow', 'netBankFlow', 'totalNetFlow',
+            'closingCashExpected', 'closingBankExpected', 'closingTotalExpected',
+            // Saved record & metadata
+            'dayClosing', 'bankAccounts', 'appSetting'
+        ));
+    }
+
+    /**
+     * Save / Lock Day Closing with actual counted physical cash & denominations
+     */
+    public function saveDayClosing(Request $request)
+    {
+        if (!auth()->user()->hasRole('admin')) {
+            abort(403, 'Unauthorized. Daily Day Closing Report is restricted to Administrators only.');
+        }
+
+        $validated = $request->validate([
+            'closing_date' => ['required', 'date'],
+            'opening_cash' => ['required', 'numeric'],
+            'opening_bank' => ['required', 'numeric'],
+            'total_opening' => ['required', 'numeric'],
+            'cash_received' => ['required', 'numeric'],
+            'bank_received' => ['required', 'numeric'],
+            'total_received' => ['required', 'numeric'],
+            'cash_paid' => ['required', 'numeric'],
+            'bank_paid' => ['required', 'numeric'],
+            'total_paid' => ['required', 'numeric'],
+            'net_cash_flow' => ['required', 'numeric'],
+            'net_bank_flow' => ['required', 'numeric'],
+            'total_net_flow' => ['required', 'numeric'],
+            'closing_cash_expected' => ['required', 'numeric'],
+            'closing_bank_expected' => ['required', 'numeric'],
+            'closing_total_expected' => ['required', 'numeric'],
+            'cash_actual_counted' => ['nullable', 'numeric', 'min:0'],
+            'denominations' => ['nullable', 'array'],
+            'notes' => ['nullable', 'string', 'max:2000'],
+            'status' => ['required', 'in:open,closed,verified'],
+        ]);
+
+        $cashCounted = isset($validated['cash_actual_counted']) ? (float) $validated['cash_actual_counted'] : null;
+        $expectedCash = (float) $validated['closing_cash_expected'];
+        $diff = $cashCounted !== null ? round($cashCounted - $expectedCash, 2) : null;
+
+        DayClosing::updateOrCreate(
+            ['closing_date' => $validated['closing_date']],
+            [
+                'opening_cash' => 0.0,
+                'opening_bank' => 0.0,
+                'total_opening' => 0.0,
+                'cash_received' => $validated['cash_received'],
+                'bank_received' => $validated['bank_received'],
+                'total_received' => $validated['total_received'],
+                'cash_paid' => $validated['cash_paid'],
+                'bank_paid' => $validated['bank_paid'],
+                'total_paid' => $validated['total_paid'],
+                'net_cash_flow' => $validated['net_cash_flow'],
+                'net_bank_flow' => $validated['net_bank_flow'],
+                'total_net_flow' => $validated['total_net_flow'],
+                'closing_cash_expected' => $expectedCash,
+                'closing_bank_expected' => $validated['closing_bank_expected'],
+                'closing_total_expected' => $validated['closing_total_expected'],
+                'cash_actual_counted' => $cashCounted,
+                'cash_difference' => $diff,
+                'denominations' => $validated['denominations'] ?? null,
+                'status' => $validated['status'],
+                'closed_by' => auth()->id(),
+                'closed_at' => now(),
+                'notes' => $validated['notes'] ?? null,
+            ]
+        );
+
+        return redirect()->route('manager.reports.day-closing', ['date' => $validated['closing_date']])
+            ->with('success', 'Day Closing record saved and updated successfully!');
     }
 }

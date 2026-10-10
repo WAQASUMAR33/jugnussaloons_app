@@ -93,5 +93,8 @@
 
     </div>
 
+    <!-- Client Birthdays & Anniversaries Celebrations Hub -->
+    @include('partials.celebrations-widget')
+
 </div>
 @endsection

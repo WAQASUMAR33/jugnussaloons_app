@@ -22,6 +22,7 @@ class Payroll extends Model
         'total_commission',
         'bonus',
         'deductions',
+        'advance_salary',
         'net_salary',
         'status',
         'payment_date',
@@ -34,6 +35,7 @@ class Payroll extends Model
         'total_commission' => 'decimal:2',
         'bonus' => 'decimal:2',
         'deductions' => 'decimal:2',
+        'advance_salary' => 'decimal:2',
         'net_salary' => 'decimal:2',
         'payment_date' => 'date',
     ];
@@ -52,6 +54,15 @@ class Payroll extends Model
     public function deductionItems()
     {
         return $this->hasMany(PayrollDeduction::class, 'account_id', 'account_id')
+            ->where('month_year', $this->month_year);
+    }
+
+    /**
+     * Itemized salary advances.
+     */
+    public function advanceItems()
+    {
+        return $this->hasMany(SalaryAdvance::class, 'account_id', 'account_id')
             ->where('month_year', $this->month_year);
     }
 }

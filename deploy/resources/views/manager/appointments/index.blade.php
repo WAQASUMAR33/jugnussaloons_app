@@ -1,611 +1,249 @@
 @extends('layouts.material')
 
-@section('title', 'Appointments & POS Billing')
+@section('title', 'Bookings & Appointment History')
 
 @section('content')
-<div x-data="{
-    activeTab: 'pos',
-    customerModalOpen: false,
-    adminAuthModalOpen: false,
-    isAdminUser: {{ auth()->user()->hasRole('admin') ? 'true' : 'false' }},
-    hasDiscountPermission: {{ (auth()->user()->hasRole('admin') || auth()->user()->hasPermission('allow-bill-discount')) ? 'true' : 'false' }},
-    canApplyDiscount: true,
-    adminPassword: '',
-    adminAuthorized: false,
-
-    selectedAppointment: null,
-    editingAppointmentId: null,
-    editingBookingNo: null,
-    bookingStatus: 'confirmed',
-    orderType: 'On Site', // 'On Site' (POS/In-store) or 'Online' (Website/App)
-
-    // Backend Lists
-    customersList: {{ json_encode($customers) }},
-    employeesList: {{ json_encode($employees) }},
-    saloonServices: {{ json_encode($saloonServices) }},
-    serviceCategories: {{ json_encode($serviceCategories) }},
-
-    // Selected Client State (Default: Walk-in Customer)
-    selectedCustomerId: '{{ $defaultCustomer->id ?? ($customers->first()->id ?? '') }}',
-    selectedCustomerObj: {{ json_encode($defaultCustomer ?? ($customers->first() ?? null)) }},
-    customerSearchQuery: '',
-
-    // Assigned Employee & Ranking State
-    selectedEmployeeId: '',
-    ranking: 0,
-    rankingNotes: '',
-
-    // Quick Rating Modal State
-    rateModalOpen: false,
-    ratingApt: null,
-    modalEmployeeId: '',
-    modalRanking: 5,
-    modalRankingNotes: '',
-
-    getRankingLabel(rank) {
-        switch(parseInt(rank)) {
-            case 5: return '⭐⭐⭐⭐⭐ Top Excellent (5/5)';
-            case 4: return '⭐⭐⭐⭐ Very Good (4/5)';
-            case 3: return '⭐⭐⭐ Good Service (3/5)';
-            case 2: return '⭐⭐ Fair Performance (2/5)';
-            case 1: return '⭐ Needs Improvement (1/5)';
-            default: return 'Click a star to rank';
-        }
-    },
-
-    openRateModal(apt) {
-        this.ratingApt = apt;
-        this.modalEmployeeId = apt.employee_id || '';
-        this.modalRanking = parseInt(apt.ranking) || 5;
-        this.modalRankingNotes = apt.ranking_notes || '';
-        this.rateModalOpen = true;
-    },
-
-    // Service Filter State
-    activeCategory: 'All Services',
-    serviceSearchQuery: '',
-
-    // Bill Details State
-    billNo: 'BILL-{{ date('Y') }}-{{ str_pad(\App\Models\Appointment::count() + 1, 4, '0', STR_PAD_LEFT) }}',
-    billDate: '{{ date('Y-m-d') }}',
-    notes: '',
-
-    // Billing Line Items
-    items: [],
-
-    // Calculations State
-    discountType: 'percentage', // 'percentage' or 'fixed'
-    discountPercentage: 0,
-    billDiscount: 0,
-    taxPercentage: 0,
-    paymentMode: 'Cash', // 'Cash', 'Card', 'Bank', 'Other'
-    extraPercentage: 0,  // Card / Bank Surcharge Fee (%)
-    
-    // Payment & Clearance State
-    previouslyPaidAmount: 0, // For existing booking
-    additionalPayment: 0,    // New payment being collected now
-    receivedAmount: 0,       // For new bill or direct override
-
-    // Hold Bills Feature State
-    heldBillsModalOpen: false,
-    heldBills: [],
-
-    // Receipt Modal & 80mm Thermal Print State
-    receiptModalOpen: false,
-    receiptData: null,
-
-    init() {
-        this.recalculateTotals();
-        this.loadHeldBills();
-    },
-
-    // Methods for Selecting Client
-    selectCustomer(cust) {
-        this.selectedCustomerId = cust.id;
-        this.selectedCustomerObj = cust;
-        this.customerModalOpen = false;
-    },
-    getFilteredCustomers() {
-        if (!this.customerSearchQuery || this.customerSearchQuery.trim() === '') return this.customersList;
-        const q = this.customerSearchQuery.toLowerCase();
-        return this.customersList.filter(c => 
-            c.name.toLowerCase().includes(q) || 
-            (c.phone_no1 && c.phone_no1.includes(q))
-        );
-    },
-
-    // Methods for Filtering Services
-    getFilteredServices() {
-        let list = this.saloonServices;
-        if (this.activeCategory !== 'All Services') {
-            list = list.filter(s => s.category && s.category.title && s.category.title.toLowerCase().includes(this.activeCategory.toLowerCase()));
-        }
-        if (this.serviceSearchQuery && this.serviceSearchQuery.trim() !== '') {
-            const q = this.serviceSearchQuery.toLowerCase();
-            list = list.filter(s => s.title.toLowerCase().includes(q) || (s.description && s.description.toLowerCase().includes(q)));
-        }
-        return list;
-    },
-
-    getImageUrl(item) {
-        if (!item || !item.image) {
-            return 'https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&w=400&q=80';
-        }
-        const img = String(item.image).trim();
-        if (img.startsWith('http://') || img.startsWith('https://')) {
-            return img;
-        }
-        return '/' + img.replace(/^\/+/, '');
-    },
-
-    // Ad-Ons (Add-Ons) Detection
-    isAddOn(item) {
-        if (!item || !item.service_obj) return false;
-        const catTitle = (item.service_obj.category && item.service_obj.category.title) ? item.service_obj.category.title.toLowerCase() : '';
-        const srvTitle = (item.service_obj.title) ? item.service_obj.title.toLowerCase() : '';
-        return catTitle.includes('ad on') || catTitle.includes('add on') || catTitle.includes('adon') || srvTitle.includes('ad on') || srvTitle.includes('add on') || srvTitle.includes('custom');
-    },
-
-    // Service Cart Handlers & Multi-Quantity Support
-    isServiceSelected(serviceId) {
-        return this.items.some(item => item.service_id == serviceId);
-    },
-    getServiceCartQuantity(serviceId) {
-        const item = this.items.find(it => it.service_id == serviceId);
-        return item ? (parseInt(item.quantity) || 1) : 0;
-    },
-    incrementService(srv, event) {
-        if (event) event.stopPropagation();
-        const item = this.items.find(it => it.service_id == srv.id);
-        if (item) {
-            item.quantity = (parseInt(item.quantity) || 1) + 1;
-        } else {
-            this.items.push({
-                service_id: srv.id,
-                service_obj: srv,
-                custom_title: srv.title,
-                quantity: 1,
-                price: parseFloat(srv.discounted_price || srv.price || 0)
-            });
-        }
-        this.recalculateDiscount();
-    },
-    decrementService(srv, event) {
-        if (event) event.stopPropagation();
-        const index = this.items.findIndex(it => it.service_id == srv.id);
-        if (index > -1) {
-            if (parseInt(this.items[index].quantity) > 1) {
-                this.items[index].quantity = parseInt(this.items[index].quantity) - 1;
-            } else {
-                this.items.splice(index, 1);
-            }
-            this.recalculateDiscount();
-        }
-    },
-    toggleService(srv) {
-        this.incrementService(srv);
-    },
-    removeItem(index) {
-        this.items.splice(index, 1);
-        this.recalculateDiscount();
-    },
-
-    // Calculations logic
-    getSubtotal() {
-        return this.items.reduce((sum, item) => sum + ((parseFloat(item.price) || 0) * (parseInt(item.quantity) || 1)), 0);
-    },
-    recalculateDiscount() {
-        const gross = this.getSubtotal();
-        if (this.discountType === 'percentage') {
-            const pct = Math.min(100, Math.max(0, parseFloat(this.discountPercentage) || 0));
-            this.billDiscount = Math.round(gross * (pct / 100));
-        } else {
-            const fixed = Math.max(0, parseFloat(this.billDiscount) || 0);
-            this.discountPercentage = gross > 0 ? Math.round((fixed / gross) * 100) : 0;
-        }
-        this.recalculateTotals();
-    },
-    applyDiscountPercent(pct) {
-        this.discountType = 'percentage';
-        this.discountPercentage = pct;
-        this.recalculateDiscount();
-    },
-    clearDiscount() {
-        this.discountPercentage = 0;
-        this.billDiscount = 0;
-        this.recalculateDiscount();
-    },
-    recalculateTotals() {
-        const tot = this.getTotalAmount();
-        if (!this.editingAppointmentId) {
-            if (this.receivedAmount === 0 || this.receivedAmount < tot) {
-                this.receivedAmount = tot;
-            }
-        }
-    },
-    getCalculatedDiscount() {
-        const gross = this.getSubtotal();
-        if (this.discountType === 'percentage') {
-            const pct = Math.min(100, Math.max(0, parseFloat(this.discountPercentage) || 0));
-            return Math.round(gross * (pct / 100));
-        }
-        return Math.max(0, parseFloat(this.billDiscount) || 0);
-    },
-    getExtraFee() {
-        if (this.paymentMode === 'Card' || this.paymentMode === 'Bank') {
-            const netBeforeExtra = Math.max(0, this.getSubtotal() - this.getCalculatedDiscount());
-            const pct = Math.max(0, parseFloat(this.extraPercentage || 0));
-            return Math.round((netBeforeExtra * pct) / 100);
-        }
-        return 0;
-    },
-    getTaxAmount() {
-        const taxable = Math.max(0, this.getSubtotal() - this.getCalculatedDiscount());
-        return Math.round(taxable * (parseFloat(this.taxPercentage || 0) / 100));
-    },
-    getTotalAmount() {
-        const total = this.getSubtotal() - this.getCalculatedDiscount() + this.getTaxAmount() + this.getExtraFee();
-        return Math.max(0, Math.round(total));
-    },
-
-    // Clearance and Payment Calculations
-    getAlreadyPaid() {
-        return parseFloat(this.previouslyPaidAmount || 0);
-    },
-    getInitialPendingBeforePay() {
-        const total = this.getTotalAmount();
-        const alreadyPaid = this.getAlreadyPaid();
-        return Math.max(0, Math.round(total - alreadyPaid));
-    },
-    isAlreadyFullyCleared() {
-        if (this.editingAppointmentId) {
-            return this.getInitialPendingBeforePay() === 0;
-        }
-        return false;
-    },
-    getTotalPaidAmount() {
-        if (this.editingAppointmentId) {
-            const alreadyPaid = this.getAlreadyPaid();
-            const addPay = parseFloat(this.additionalPayment || 0);
-            return Math.round(alreadyPaid + addPay);
-        }
-        return Math.round(parseFloat(this.receivedAmount || 0));
-    },
-    getStillPendingAmount() {
-        const total = this.getTotalAmount();
-        const totalPaid = this.getTotalPaidAmount();
-        return Math.max(0, Math.round(total - totalPaid));
-    },
-    getChangeReturn() {
-        const total = this.getTotalAmount();
-        const totalPaid = this.getTotalPaidAmount();
-        return Math.max(0, Math.round(totalPaid - total));
-    },
-    clearFullRemainingBalance() {
-        if (this.editingAppointmentId) {
-            this.additionalPayment = this.getInitialPendingBeforePay();
-        } else {
-            this.receivedAmount = this.getTotalAmount();
-        }
-    },
-    // Load Existing Booking into Billing Terminal for Editing
-    loadAppointmentForEdit(apt) {
-        this.editingAppointmentId = apt.id;
-        this.editingBookingNo = apt.booking_no;
-        this.orderType = apt.order_type || 'On Site';
-        this.bookingStatus = apt.status || 'confirmed';
-        this.selectedCustomerId = apt.account_id;
-        this.selectedCustomerObj = apt.customer || this.customersList.find(c => c.id == apt.account_id) || null;
-        this.selectedEmployeeId = apt.employee_id || '';
-        this.ranking = parseInt(apt.ranking) || 0;
-        this.rankingNotes = apt.ranking_notes || '';
-        this.billNo = apt.booking_no;
-        this.billDate = apt.appointment_date ? (typeof apt.appointment_date === 'string' ? apt.appointment_date.split('T')[0] : apt.appointment_date) : '{{ date('Y-m-d') }}';
-        this.notes = apt.notes || '';
-        this.discountType = apt.discount_type || 'percentage';
-        this.discountPercentage = parseFloat(apt.discount_percentage) || 0;
-        this.billDiscount = parseFloat(apt.discount) || 0;
-        this.paymentMode = apt.payment_mode || 'Cash';
-        const netBeforeExtra = Math.max(0, (parseFloat(apt.total_amount) || 0) - (parseFloat(apt.discount) || 0));
-        const extraAmt = parseFloat(apt.extra_amount) || 0;
-        if (extraAmt > 0 && netBeforeExtra > 0) {
-            this.extraPercentage = Math.round((extraAmt / netBeforeExtra) * 100 * 100) / 100;
-        } else {
-            this.extraPercentage = 0;
-        }
-        
-        // Track previous payments
-        this.previouslyPaidAmount = parseFloat(apt.paid_amount) || 0;
-        this.additionalPayment = 0;
-        this.receivedAmount = parseFloat(apt.paid_amount) || 0;
-
-        // Load all items belonging to this booking
-        this.items = [];
-        if (apt.items && apt.items.length > 0) {
-            apt.items.forEach(it => {
-                const srv = this.saloonServices.find(s => s.id == it.saloon_service_id) || it.service;
-                const qty = parseInt(it.quantity) || 1;
-                const unitPrice = (it.price && parseFloat(it.price) > 0)
-                    ? parseFloat(it.price)
-                    : (parseFloat(it.discounted_price || (srv ? (srv.discounted_price || srv.price) : 0)) / qty);
-                this.items.push({
-                    service_id: it.saloon_service_id,
-                    service_obj: srv,
-                    custom_title: it.custom_title || (srv ? srv.title : 'Service'),
-                    quantity: qty,
-                    price: unitPrice
-                });
-            });
-        }
-
-        this.recalculateDiscount();
-        this.activeTab = 'pos';
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    },
-
-    // Reset Terminal to Fresh New Bill
-    resetToNewBill() {
-        this.editingAppointmentId = null;
-        this.editingBookingNo = null;
-        this.orderType = 'On Site';
-        this.bookingStatus = 'confirmed';
-        this.billNo = 'BILL-{{ date('Y') }}-{{ str_pad(\App\Models\Appointment::count() + 1, 4, '0', STR_PAD_LEFT) }}';
-        this.billDate = '{{ date('Y-m-d') }}';
-        this.items = [];
-        this.notes = '';
-        this.discountPercentage = 0;
-        this.billDiscount = 0;
-        this.previouslyPaidAmount = 0;
-        this.additionalPayment = 0;
-        this.receivedAmount = 0;
-        this.extraPercentage = 0;
-        this.paymentMode = 'Cash';
-        this.adminPassword = '';
-        this.adminAuthorized = false;
-        this.selectedCustomerId = '{{ $defaultCustomer->id ?? ($customers->first()->id ?? '') }}';
-        this.selectedCustomerObj = {{ json_encode($defaultCustomer ?? ($customers->first() ?? null)) }};
-        this.selectedEmployeeId = '';
-        this.ranking = 0;
-        this.rankingNotes = '';
-        this.activeTab = 'pos';
-    },
-
-    // Held Bills Operations
-    loadHeldBills() {
-        try {
-            const saved = localStorage.getItem('pos_held_appointments');
-            this.heldBills = saved ? JSON.parse(saved) : [];
-        } catch(e) {
-            this.heldBills = [];
-        }
-    },
-    saveHeldBills() {
-        try {
-            localStorage.setItem('pos_held_appointments', JSON.stringify(this.heldBills));
-        } catch(e) {}
-    },
-    holdCurrentBill() {
-        if (this.items.length === 0) {
-            alert('Please add at least one treatment / service to the bill before putting it on hold.');
-            return;
-        }
-        const clientName = this.selectedCustomerObj ? this.selectedCustomerObj.name : 'Walk-in Client';
-        const record = {
-            id: Date.now(),
-            heldAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            billNo: this.billNo,
-            orderType: this.orderType,
-            bookingStatus: this.bookingStatus,
-            selectedCustomerId: this.selectedCustomerId,
-            selectedCustomerObj: this.selectedCustomerObj,
-            billDate: this.billDate,
-            notes: this.notes,
-            discountType: this.discountType,
-            discountPercentage: this.discountPercentage,
-            billDiscount: this.billDiscount,
-            paymentMode: this.paymentMode,
-            extraPercentage: this.extraPercentage,
-            receivedAmount: this.receivedAmount,
-            additionalPayment: this.additionalPayment,
-            previouslyPaidAmount: this.previouslyPaidAmount,
-            editingAppointmentId: this.editingAppointmentId,
-            editingBookingNo: this.editingBookingNo,
-            items: JSON.parse(JSON.stringify(this.items)),
-            totalAmount: this.getTotalAmount(),
-            clientName: clientName
-        };
-
-        this.heldBills.unshift(record);
-        this.saveHeldBills();
-        this.resetToNewBill();
-        alert('⏸️ Appointment for ' + clientName + ' has been put on hold.\n\nYou can resume it anytime from the Held Bills button.');
-    },
-    resumeHeldBill(record) {
-        if (this.items.length > 0) {
-            if (!confirm('Current in-progress bill will be replaced with the held bill. Do you wish to continue?')) {
-                return;
-            }
-        }
-        this.editingAppointmentId = record.editingAppointmentId || null;
-        this.editingBookingNo = record.editingBookingNo || null;
-        this.orderType = record.orderType || 'On Site';
-        this.bookingStatus = record.bookingStatus || 'confirmed';
-        this.selectedCustomerId = record.selectedCustomerId;
-        this.selectedCustomerObj = record.selectedCustomerObj;
-        this.billNo = record.billNo || ('BILL-{{ date('Y') }}-{{ str_pad(\App\Models\Appointment::count() + 1, 4, '0', STR_PAD_LEFT) }}');
-        this.billDate = record.billDate || '{{ date('Y-m-d') }}';
-        this.notes = record.notes || '';
-        this.discountType = record.discountType || 'percentage';
-        this.discountPercentage = record.discountPercentage || 0;
-        this.billDiscount = record.billDiscount || 0;
-        this.paymentMode = record.paymentMode || 'Cash';
-        this.extraPercentage = record.extraPercentage !== undefined ? record.extraPercentage : (record.extraAmount || 0);
-        this.receivedAmount = record.receivedAmount || 0;
-        this.additionalPayment = record.additionalPayment || 0;
-        this.previouslyPaidAmount = record.previouslyPaidAmount || 0;
-        this.items = record.items ? JSON.parse(JSON.stringify(record.items)) : [];
-
-        // Remove this record from held list
-        this.heldBills = this.heldBills.filter(h => h.id !== record.id);
-        this.saveHeldBills();
-        this.heldBillsModalOpen = false;
-        this.recalculateDiscount();
-        this.activeTab = 'pos';
-    },
-    discardHeldBill(recordId) {
-        if (confirm('Are you sure you want to discard this held bill?')) {
-            this.heldBills = this.heldBills.filter(h => h.id !== recordId);
-            this.saveHeldBills();
-        }
-    },
-
-    // Generate and Prepare 80mm Receipt Data
-    generateReceiptData(apt = null) {
-        if (apt) {
-            const receiptItems = (apt.items || []).map(it => {
-                const srv = this.saloonServices.find(s => s.id == it.saloon_service_id) || it.service;
-                const qty = parseInt(it.quantity) || 1;
-                const unitPrice = (it.price && parseFloat(it.price) > 0)
-                    ? parseFloat(it.price)
-                    : (parseFloat(it.discounted_price || (srv ? (srv.discounted_price || srv.price) : 0)) / qty);
-                return {
-                    title: it.custom_title || (srv ? srv.title : 'Service'),
-                    quantity: qty,
-                    price: unitPrice,
-                    total: parseFloat(it.discounted_price || (unitPrice * qty))
-                };
-            });
-
-            return {
-                billNo: apt.booking_no,
-                billDate: apt.appointment_date ? (typeof apt.appointment_date === 'string' ? apt.appointment_date.split('T')[0] : apt.appointment_date) : '{{ date('Y-m-d') }}',
-                billTime: apt.start_time || '{{ date('h:i A') }}',
-                orderType: apt.order_type || 'On Site',
-                customerName: (apt.customer ? apt.customer.name : 'Walk-in Client'),
-                customerPhone: (apt.customer ? (apt.customer.phone_no1 || '') : ''),
-                items: receiptItems,
-                subtotal: parseFloat(apt.total_amount) || 0,
-                discount: parseFloat(apt.discount) || 0,
-                discountPercentage: parseFloat(apt.discount_percentage) || 0,
-                extraPercentage: (parseFloat(apt.extra_amount) > 0 && (parseFloat(apt.total_amount) - parseFloat(apt.discount)) > 0) ? (Math.round((parseFloat(apt.extra_amount) / (parseFloat(apt.total_amount) - parseFloat(apt.discount))) * 100 * 100) / 100) : 0,
-                extraAmount: parseFloat(apt.extra_amount) || 0,
-                netAmount: parseFloat(apt.net_amount) || 0,
-                paidAmount: parseFloat(apt.paid_amount) || 0,
-                balanceDue: parseFloat(apt.balance_due) || 0,
-                changeReturn: Math.max(0, (parseFloat(apt.paid_amount) || 0) - (parseFloat(apt.net_amount) || 0)),
-                paymentMode: apt.payment_mode || 'Cash',
-                status: apt.status || 'confirmed',
-                notes: apt.notes || ''
-            };
-        } else {
-            if (this.items.length === 0) {
-                alert('Please select at least one treatment / service to generate a receipt.');
-                return null;
-            }
-            const cartItems = this.items.map(it => {
-                const qty = parseInt(it.quantity) || 1;
-                const unitPrice = parseFloat(it.price) || 0;
-                return {
-                    title: it.custom_title || (it.service_obj ? it.service_obj.title : 'Service'),
-                    quantity: qty,
-                    price: unitPrice,
-                    total: unitPrice * qty
-                };
-            });
-
-            return {
-                billNo: this.editingAppointmentId ? this.editingBookingNo : this.billNo,
-                billDate: this.billDate,
-                billTime: '{{ date('h:i A') }}',
-                orderType: this.orderType,
-                customerName: this.selectedCustomerObj ? this.selectedCustomerObj.name : 'Walk-in Client',
-                customerPhone: this.selectedCustomerObj ? (this.selectedCustomerObj.phone_no1 || '') : '',
-                items: cartItems,
-                subtotal: this.getSubtotal(),
-                discount: this.getCalculatedDiscount(),
-                discountPercentage: this.discountPercentage,
-                extraPercentage: parseFloat(this.extraPercentage || 0),
-                extraAmount: this.getExtraFee(),
-                netAmount: this.getTotalAmount(),
-                paidAmount: this.getTotalPaidAmount(),
-                balanceDue: this.getRemainingBalanceDue(),
-                changeReturn: this.getChangeReturn(),
-                paymentMode: this.paymentMode,
-                status: this.bookingStatus,
-                notes: this.notes
-            };
-        }
-    },
-
-    openReceiptModal(apt = null) {
-        const data = this.generateReceiptData(apt);
-        if (data) {
-            this.receiptData = data;
-            this.receiptModalOpen = true;
-        }
-    },
-
-    print80mmReceiptDirect(apt = null) {
-        const data = this.generateReceiptData(apt);
-        if (data) {
-            this.receiptData = data;
-            this.$nextTick(() => {
-                document.body.classList.add('pos-receipt-active');
-                window.print();
-                setTimeout(() => {
-                    document.body.classList.remove('pos-receipt-active');
-                }, 1000);
-            });
-        }
-    },
-
-    // Submission Handlers
-    submitForm(isPrint = false) {
-        if (this.items.length === 0) {
-            alert('Please select at least one treatment service from the catalog.');
-            return;
-        }
-        if (!this.selectedCustomerId) {
-            alert('Please select or add a client.');
-            return;
-        }
-
-        // Check 10% discount restriction:
-        // <= 10% is allowed for every user unconditionally.
-        // > 10% is allowed if user has allow-bill-discount permission or admin, OR if admin authorization code/password is provided.
-        if (this.discountPercentage > 10 && !this.hasDiscountPermission && !this.adminAuthorized && (!this.adminPassword || this.adminPassword.trim() === '')) {
-            this.adminAuthModalOpen = true;
-            return;
-        }
-
-        const form = document.getElementById('posBookingForm');
-        if (isPrint) {
-            this.receiptData = this.generateReceiptData();
-            this.$nextTick(() => {
-                document.body.classList.add('pos-receipt-active');
-                window.print();
-                setTimeout(() => {
-                    document.body.classList.remove('pos-receipt-active');
-                    form.submit();
-                }, 1000);
-            });
-            return;
-        }
-        form.submit();
-    },
-
-    authorizeAdminAndSubmit() {
-        if (!this.adminPassword || this.adminPassword.trim() === '') {
-            alert('Please enter the Admin Password.');
-            return;
-        }
-        this.adminAuthorized = true;
-        this.adminAuthModalOpen = false;
-        this.submitForm(false);
+@php
+    $brandSettings = \App\Models\Setting::getSettings();
+@endphp
+<style>
+    /* POS 80mm Thermal Receipt Print Rules */
+    @page {
+        size: auto;
+        margin: 0;
     }
-}" class="space-y-6">
+    @media print {
+        /* Completely collapse dashboard navigation and app frames so they do not take layout space */
+        aside, nav, header, footer, .sidebar, #posBookingForm, [x-show="activeTab === 'history'"], .print\:hidden {
+            display: none !important;
+        }
+        body, html {
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            overflow: visible !important;
+            height: auto !important;
+        }
+        body.pos-receipt-active * {
+            visibility: hidden !important;
+        }
+        body.pos-receipt-active #posReceiptPrintMount,
+        body.pos-receipt-active #posReceiptPrintMount *,
+        body.pos-receipt-active .pos-receipt-80mm-container,
+        body.pos-receipt-active .pos-receipt-80mm-container * {
+            visibility: visible !important;
+            display: block !important;
+        }
+        body.pos-receipt-active #posReceiptPrintMount {
+            display: block !important;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            margin-left: 0 !important;
+            padding: 0 1.5mm !important;
+            background: #ffffff !important;
+            z-index: 999999 !important;
+            box-sizing: border-box !important;
+        }
+    }
+</style>
 
-    <!-- Top Action Bar & Tabs Header -->
+<script>
+function appointmentHistory() {
+    return {
+        brandSettings: {
+            name: @json($brandSettings->brand_name ?? 'Jugnu Saloon'),
+            logo: @json($brandSettings->brand_logo ? asset($brandSettings->brand_logo) : ''),
+            slogan: @json($brandSettings->brand_slogan ?? ''),
+            address: @json($brandSettings->brand_address ?? ''),
+            phone1: @json($brandSettings->brand_phone1 ?? ''),
+            phone2: @json($brandSettings->brand_phone2 ?? ''),
+            appointmentReceiptNote: @json($brandSettings->appointment_receipt_note ?? '')
+        },
+        proofModalOpen: false,
+        proofModalData: {
+            appointmentId: null,
+            url: '',
+            bookingNo: '',
+            clientName: '',
+            amount: '',
+            date: '',
+            orderType: 'Online',
+            imgLoading: true,
+            imgError: false,
+            uploading: false,
+            uploadSuccess: false,
+            errorMessage: '',
+            showReplaceForm: false
+        },
+        openProofModal(appointmentId, url, bookingNo, clientName, amount, date, orderType = 'Online') {
+            this.proofModalData = {
+                appointmentId: appointmentId,
+                url: url || '',
+                bookingNo: bookingNo,
+                clientName: clientName,
+                amount: amount,
+                date: date,
+                orderType: orderType,
+                imgLoading: !!url,
+                imgError: !url,
+                uploading: false,
+                uploadSuccess: false,
+                errorMessage: '',
+                showReplaceForm: !url
+            };
+            this.proofModalOpen = true;
+        },
+        uploadSlip() {
+            if (typeof window.uploadAppointmentReceiptSlip === 'function') {
+                window.uploadAppointmentReceiptSlip(this);
+            }
+        },
+
+        rateModalOpen: false,
+        ratingApt: null,
+        ratingScore: 5,
+        ratingNotes: '',
+        openRateModal(apt) {
+            if (!apt) return;
+            this.ratingApt = apt;
+            this.ratingScore = parseInt(apt.ranking) || 5;
+            this.ratingNotes = apt.ranking_notes || '';
+            this.rateModalOpen = true;
+        },
+
+        receiptModalOpen: false,
+        receiptData: null,
+        openReceiptModal(apt) {
+            if (!apt) return;
+            const rawItems = (apt.items || []).map(it => {
+                const qty = parseInt(it.quantity) || 1;
+                const origPrice = parseFloat(it.price) || 0;
+                const discAmt = parseFloat(it.discount) || 0;
+                const discPrice = parseFloat(it.discounted_price) || 0;
+                const effectiveOrig = origPrice > 0 ? origPrice : (discPrice + discAmt);
+                const lineTotal = discPrice > 0 ? discPrice : (effectiveOrig * qty - discAmt);
+                return {
+                    title: it.custom_title || (it.service ? it.service.title : 'Service'),
+                    quantity: qty,
+                    price: effectiveOrig > 0 ? effectiveOrig : lineTotal,
+                    discount: discAmt,
+                    discountText: discAmt > 0 ? `PKR ${discAmt.toLocaleString()} OFF` : '',
+                    total: Math.max(0, lineTotal)
+                };
+            });
+
+            let itemDiscountsTotal = rawItems.reduce((sum, it) => sum + (parseFloat(it.discount) || 0), 0);
+            let rawSubtotal = rawItems.reduce((sum, it) => sum + (parseFloat(it.price) || 0) * (parseInt(it.quantity) || 1), 0);
+            if (rawSubtotal <= 0) {
+                rawSubtotal = parseFloat(apt.total_amount || 0) + itemDiscountsTotal;
+            }
+
+            const billDiscount = parseFloat(apt.discount || 0);
+            const totalDiscount = itemDiscountsTotal + billDiscount;
+
+            let finalItems = rawItems;
+            if (itemDiscountsTotal === 0 && billDiscount > 0 && rawItems.length > 0 && rawSubtotal > 0) {
+                let allocated = 0;
+                finalItems = rawItems.map((it, idx) => {
+                    const gross = it.price * it.quantity;
+                    let itemDisc = (idx === rawItems.length - 1)
+                        ? (billDiscount - allocated)
+                        : Math.round(billDiscount * (gross / rawSubtotal));
+                    allocated += itemDisc;
+                    return {
+                        ...it,
+                        discount: itemDisc,
+                        discountText: itemDisc > 0 ? `PKR ${itemDisc.toLocaleString()} OFF` : '',
+                        total: Math.max(0, gross - itemDisc)
+                    };
+                });
+            }
+
+            this.receiptData = {
+                billNo: apt.booking_no,
+                billDate: apt.appointment_date ? (typeof apt.appointment_date === 'string' ? apt.appointment_date.split('T')[0] : apt.appointment_date) : '',
+                billTime: apt.start_time || '',
+                customerName: apt.customer ? apt.customer.name : 'Walk-in Client',
+                customerPhone: apt.customer ? apt.customer.phone_no1 : '',
+                orderType: apt.order_type || 'On Site',
+                items: finalItems,
+                subtotal: rawSubtotal,
+                serviceDiscount: itemDiscountsTotal,
+                billDiscount: billDiscount,
+                discount: totalDiscount,
+                discountPercentage: parseFloat(apt.discount_percentage || 0),
+                extraAmount: parseFloat(apt.extra_amount || 0),
+                extraPercentage: (parseFloat(apt.extra_amount || 0) > 0 && (rawSubtotal - totalDiscount) > 0) 
+                    ? Math.round((parseFloat(apt.extra_amount || 0) / (rawSubtotal - totalDiscount)) * 100) 
+                    : 0,
+                netAmount: parseFloat(apt.net_amount || (rawSubtotal - totalDiscount + (parseFloat(apt.extra_amount) || 0))),
+                paymentMode: apt.payment_mode || 'Cash',
+                paidAmount: parseFloat(apt.paid_amount || 0),
+                balanceDue: parseFloat(apt.balance_due || 0),
+                changeReturn: Math.max(0, parseFloat(apt.paid_amount || 0) - parseFloat(apt.net_amount || 0)),
+                notes: apt.notes || '',
+                generatedBy: '{{ addslashes(auth()->user()->name ?? 'Staff') }}'
+            };
+            this.receiptModalOpen = true;
+        },
+        print80mmReceiptDirect() {
+            if (!this.receiptData) return;
+            const receiptHtml = window.buildAppointmentReceiptDocument(this.receiptData, this.brandSettings);
+            let printIframe = document.getElementById('posReceiptPrintIframe');
+            if (!printIframe) {
+                printIframe = document.createElement('iframe');
+                printIframe.id = 'posReceiptPrintIframe';
+                printIframe.style.position = 'fixed';
+                printIframe.style.right = '0';
+                printIframe.style.bottom = '0';
+                printIframe.style.width = '0px';
+                printIframe.style.height = '0px';
+                printIframe.style.border = '0';
+                printIframe.style.visibility = 'hidden';
+                document.body.appendChild(printIframe);
+            }
+            const doc = printIframe.contentWindow.document;
+            doc.open();
+            doc.write(receiptHtml);
+            doc.close();
+
+            const triggerPrint = () => {
+                try {
+                    printIframe.contentWindow.focus();
+                    printIframe.contentWindow.print();
+                } catch(err) {
+                    console.error('Print error:', err);
+                }
+            };
+
+            const logoImg = doc.querySelector('img');
+            if (logoImg && !logoImg.complete) {
+                logoImg.onload = triggerPrint;
+                logoImg.onerror = triggerPrint;
+                setTimeout(triggerPrint, 800);
+            } else {
+                setTimeout(triggerPrint, 350);
+            }
+        },
+
+        appointmentsList: @json($appointments->items()),
+        getAppointmentById(id) {
+            if (!id) return null;
+            return (this.appointmentsList || []).find(a => a.id == id) || null;
+        }
+    };
+}
+</script>
+
+
+<div x-data="appointmentHistory()" class="space-y-6 w-full">
+
+    <!-- Top Action Bar & Navigation Header -->
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-5 rounded-none border border-slate-200 shadow-sm">
         <div>
             <div class="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
@@ -614,706 +252,108 @@
                 <span class="text-indigo-600">POS Billing & Appointments</span>
             </div>
             <h1 class="text-2xl font-black text-slate-900 tracking-tight heading-font mt-0.5">
-                <template x-if="editingAppointmentId">
-                    <span>Edit Booking <span class="text-indigo-600" x-text="'#' + editingBookingNo"></span></span>
-                </template>
-                <template x-if="!editingAppointmentId">
-                    <span>Billing & Service Checkout</span>
-                </template>
+                <span>Bookings & Appointment History</span>
             </h1>
         </div>
 
-        <!-- Mode Switcher Tabs -->
-        <div class="flex items-center gap-2 shrink-0">
-            <!-- Held Bills Modal Trigger -->
-            <button type="button" @click="heldBillsModalOpen = true" 
-                    class="px-3.5 py-2 text-xs rounded-none transition-all flex items-center gap-1.5 border font-bold shadow-2xs"
-                    :class="heldBills.length > 0 ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'">
-                <svg class="w-3.5 h-3.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                <span>Held Bills</span>
-                <span class="px-1.5 py-0.2 text-[10px] font-black" 
-                      :class="heldBills.length > 0 ? 'bg-amber-600 text-white' : 'bg-slate-200 text-slate-700'" 
-                      x-text="heldBills.length">0</span>
-            </button>
+        <!-- Mode Switcher Tabs & Quick Action -->
+        <div class="flex flex-wrap items-center gap-2">
+            <a href="{{ route('manager.appointments.create') }}" 
+               class="px-4 py-2 text-xs rounded-none transition-all flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black shadow-sm">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                <span>+ New Bill / Booking</span>
+            </a>
 
-            <div class="inline-flex p-1 bg-slate-100 rounded-none border border-slate-200">
-                <button type="button" @click="resetToNewBill()" 
-                        :class="activeTab === 'pos' && !editingAppointmentId ? 'bg-white text-indigo-700 shadow-sm font-black' : 'text-slate-600 hover:text-slate-900 font-bold'"
-                        class="px-4 py-2 text-xs rounded-none transition-all flex items-center gap-2">
-                    <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            <div class="inline-flex flex-wrap sm:flex-nowrap p-1 bg-slate-100 rounded-none border border-slate-200">
+                <a href="{{ route('manager.appointments.create') }}" 
+                   class="px-4 py-2 text-xs rounded-none transition-all flex items-center gap-2 text-slate-600 hover:text-slate-900 font-bold">
+                    <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                     <span>New Bill Terminal</span>
-                </button>
-                <button type="button" @click="activeTab = 'history'" 
-                        :class="activeTab === 'history' ? 'bg-white text-indigo-700 shadow-sm font-black' : 'text-slate-600 hover:text-slate-900 font-bold'"
-                        class="px-4 py-2 text-xs rounded-none transition-all flex items-center gap-2">
-                    <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+                </a>
+                <a href="{{ route('manager.appointments.index') }}" 
+                   class="px-4 py-2 text-xs rounded-none transition-all flex items-center gap-2 bg-white text-indigo-700 shadow-sm font-black">
+                    <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
                     <span>Bookings History ({{ $appointments->total() }})</span>
-                </button>
+                </a>
+                <a href="{{ route('manager.ratings.index') }}" 
+                   class="px-4 py-2 text-xs rounded-none transition-all flex items-center gap-1.5 text-amber-700 hover:text-amber-800 hover:bg-amber-50 font-bold">
+                    <span>⭐</span>
+                    <span>Staff Feedback</span>
+                </a>
             </div>
         </div>
     </div>
 
-    <!-- TAB 1: POS TERMINAL BILLING WORKFLOW -->
-    <div x-show="activeTab === 'pos'" class="space-y-5">
 
-        <!-- Active Editing Notification Banner -->
-        <div x-show="editingAppointmentId" class="p-3.5 bg-amber-50 border border-amber-300 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs rounded-none">
-            <div class="flex items-center gap-2.5">
-                <span class="w-2.5 h-2.5 bg-amber-500 rounded-full animate-ping"></span>
-                <span class="font-black text-amber-900">
-                    Editing Booking <span class="underline font-mono" x-text="'#' + editingBookingNo"></span> 
-                    (Client: <span x-text="selectedCustomerObj ? selectedCustomerObj.name : 'Client'"></span>)
-                </span>
-                <span class="px-2 py-0.5 text-[10px] font-black uppercase" 
-                      :class="orderType === 'Online' ? 'bg-cyan-100 text-cyan-800 border border-cyan-300' : 'bg-slate-200 text-slate-800 border border-slate-300'"
-                      x-text="orderType === 'Online' ? '🌐 Online Booking' : '🏢 On Site Booking'"></span>
-            </div>
-            <div class="flex items-center gap-3">
-                <span class="text-[11px] font-bold text-amber-800" x-text="'Already Paid: PKR ' + getPreviouslyPaid().toLocaleString()"></span>
-                <button type="button" @click="resetToNewBill()" class="px-3 py-1 bg-white hover:bg-amber-100 text-amber-900 font-bold border border-amber-300 transition-colors">
-                    ✕ Cancel & Start New Bill
-                </button>
-            </div>
-        </div>
-
-        <form id="posBookingForm" method="POST" :action="editingAppointmentId ? ('/manager/appointments/' + editingAppointmentId) : '{{ route('manager.appointments.store') }}'">
-            @csrf
-            <template x-if="editingAppointmentId">
-                <input type="hidden" name="_method" value="PUT">
-            </template>
-
-            <input type="hidden" name="order_type" :value="orderType">
-            <input type="hidden" name="account_id" :value="selectedCustomerId">
-            <input type="hidden" name="employee_id" :value="selectedEmployeeId">
-            <input type="hidden" name="ranking" :value="ranking">
-            <input type="hidden" name="ranking_notes" :value="rankingNotes">
-            <input type="hidden" name="appointment_date" :value="billDate">
-            <input type="hidden" name="discount_type" :value="discountType">
-            <input type="hidden" name="discount" :value="getCalculatedDiscount()">
-            <input type="hidden" name="discount_percentage" :value="discountPercentage">
-            <input type="hidden" name="extra_amount" :value="getExtraFee()">
-            <input type="hidden" name="status" :value="bookingStatus">
-            <input type="hidden" name="admin_password" :value="adminPassword">
-            
-            <!-- Send Total Paid to Backend -->
-            <input type="hidden" name="paid_amount" :value="getTotalPaidAmount()">
-            <input type="hidden" name="payment_mode" :value="paymentMode">
-            <input type="hidden" name="notes" :value="notes">
-
-            <!-- Itemized Services with Custom Titles, Prices & Quantities (for Multi-Services & Ad Ons) -->
-            <template x-for="(item, idx) in items" :key="idx">
-                <div>
-                    <input type="hidden" name="service_ids[]" :value="item.service_id">
-                    <input type="hidden" name="service_quantities[]" :value="item.quantity || 1">
-                    <input type="hidden" name="service_custom_titles[]" :value="item.custom_title || ''">
-                    <input type="hidden" name="service_prices[]" :value="item.price">
-                </div>
-            </template>
-
-            <!-- 3-Column Modern Grid -->
-            <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-
-                <!-- LEFT COLUMN: Client & Bill Meta Information (col-span-3) -->
-                <div class="lg:col-span-3 space-y-5">
-
-                    <!-- Client Selector Card -->
-                    <div class="bg-white rounded-none border border-slate-200 p-5 shadow-sm space-y-4">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center gap-2.5">
-                                <span class="w-6 h-6 rounded-none bg-indigo-600 text-white font-black text-xs flex items-center justify-center">1</span>
-                                <h3 class="font-extrabold text-sm text-slate-900 heading-font">Client Details</h3>
-                            </div>
-                            <button type="button" @click="customerModalOpen = true" 
-                                    class="px-2.5 py-1 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-none transition-colors border border-indigo-200">
-                                Change
-                            </button>
-                        </div>
-
-                        <!-- Selected Client Overview Box -->
-                        <div class="p-3.5 bg-slate-50 rounded-none border border-slate-200 flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-none bg-indigo-600 text-white font-black text-xs flex items-center justify-center shrink-0">
-                                <span x-text="selectedCustomerObj ? selectedCustomerObj.name.substring(0, 2).toUpperCase() : 'CL'"></span>
-                            </div>
-                            <div class="overflow-hidden">
-                                <h4 class="font-bold text-xs text-slate-900 truncate" x-text="selectedCustomerObj ? selectedCustomerObj.name : 'Select Client'">Sara Khan</h4>
-                                <p class="text-[11px] text-slate-500 font-medium truncate" x-text="selectedCustomerObj ? (selectedCustomerObj.phone_no1 || 'No Phone') : '0300-1234567'">0300-1234567</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Bill Meta Information Card -->
-                    <div class="bg-white rounded-none border border-slate-200 p-5 shadow-sm space-y-4">
-                        <div class="flex items-center gap-2.5">
-                            <span class="w-6 h-6 rounded-none bg-indigo-600 text-white font-black text-xs flex items-center justify-center">2</span>
-                            <h3 class="font-extrabold text-sm text-slate-900 heading-font">Booking Parameters</h3>
-                        </div>
-
-                        <div class="space-y-3.5 text-xs font-bold text-slate-700">
-                            <!-- Bill Identifier & Order Type -->
-                            <div class="grid grid-cols-2 gap-2">
-                                <div class="space-y-1">
-                                    <label class="block text-slate-500 font-bold text-[11px]">Invoice #</label>
-                                    <input type="text" x-model="billNo" readonly 
-                                           class="w-full px-2.5 py-2.5 bg-slate-100 border border-slate-200 rounded-none font-mono font-bold text-slate-800 text-xs">
-                                </div>
-                                <div class="space-y-1">
-                                    <label class="block text-slate-500 font-bold text-[11px]">Order Channel</label>
-                                    <select x-model="orderType" 
-                                            class="w-full px-2.5 py-2.5 bg-slate-50 border border-slate-200 rounded-none font-bold text-slate-800 text-xs focus:ring-2 focus:ring-indigo-500">
-                                        <option value="On Site">🏢 On Site</option>
-                                        <option value="Online">🌐 Online</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <!-- Bill Date & Status -->
-                            <div class="grid grid-cols-2 gap-2">
-                                <div class="space-y-1">
-                                    <label class="block text-slate-500 font-bold text-[11px]">Service Date</label>
-                                    <input type="date" x-model="billDate" 
-                                           class="w-full px-2.5 py-2.5 bg-slate-50 border border-slate-200 rounded-none font-bold text-slate-800 text-xs focus:ring-2 focus:ring-indigo-500">
-                                </div>
-                                <div class="space-y-1">
-                                    <label class="block text-slate-500 font-bold text-[11px]">Status</label>
-                                    <select x-model="bookingStatus" 
-                                            class="w-full px-2.5 py-2.5 bg-slate-50 border border-slate-200 rounded-none font-bold text-slate-800 text-xs focus:ring-2 focus:ring-indigo-500">
-                                        <option value="confirmed">Confirmed</option>
-                                        <option value="completed">Completed</option>
-                                        <option value="pending">Pending</option>
-                                        <option value="cancelled">Cancelled</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <!-- Assigned Stylist / Staff Employee -->
-                            <div class="space-y-1">
-                                <label class="block text-slate-500 font-bold text-[11px]">Assigned Stylist / Staff</label>
-                                <select x-model="selectedEmployeeId" 
-                                        class="w-full px-2.5 py-2.5 bg-slate-50 border border-slate-200 rounded-none font-bold text-slate-800 text-xs focus:ring-2 focus:ring-indigo-500">
-                                    <option value="">-- No Specific Staff Assigned --</option>
-                                    @foreach($employees as $emp)
-                                        <option value="{{ $emp->id }}">
-                                            💇 {{ $emp->name }} {{ $emp->category ? '('.$emp->category->title.')' : '' }} {{ $emp->average_ranking > 0 ? '— ⭐ '.number_format($emp->average_ranking, 1) : '' }}
-                                        </option>
-                                    @endforeach
-                                </select>
-                            </div>
-
-                            <!-- Staff Service Ranking System Widget -->
-                            <div class="space-y-2 p-3 bg-amber-50/50 border border-amber-200 rounded-none">
-                                <div class="flex items-center justify-between">
-                                    <label class="block text-slate-800 font-black text-[11px] uppercase tracking-wider">
-                                        ⭐ Staff Service Ranking
-                                    </label>
-                                    <span class="text-[10px] font-black text-amber-800" x-text="ranking > 0 ? (ranking + '/5 Stars') : 'Unrated'"></span>
-                                </div>
-                                
-                                <!-- Star Buttons -->
-                                <div class="flex items-center gap-1.5 py-1">
-                                    <template x-for="star in [1, 2, 3, 4, 5]" :key="star">
-                                        <button type="button" @click="ranking = (ranking === star ? 0 : star)" 
-                                                class="text-2xl transition-transform hover:scale-125 focus:outline-hidden"
-                                                :title="'Rank ' + star + ' Star'">
-                                            <span :class="ranking >= star ? 'text-amber-500' : 'text-slate-300'">★</span>
-                                        </button>
-                                    </template>
-                                    <button type="button" x-show="ranking > 0" @click="ranking = 0" class="text-[10px] text-slate-400 hover:text-slate-600 ml-2 font-bold underline">
-                                        Clear
-                                    </button>
-                                </div>
-                                <div class="text-[10px] font-bold text-slate-600" x-text="getRankingLabel(ranking)"></div>
-
-                                <!-- Review / Ranking Notes -->
-                                <input type="text" x-model="rankingNotes" placeholder="Performance feedback / review notes..."
-                                       class="w-full px-2.5 py-1.5 bg-white border border-amber-200 text-slate-800 text-[11px] font-medium focus:ring-1 focus:ring-amber-500">
-                            </div>
-
-                            <!-- Notes -->
-                            <div class="space-y-1">
-                                <label class="block text-slate-500 font-bold text-[11px]">Notes / Special Requests</label>
-                                <textarea x-model="notes" rows="2" placeholder="Special hair/skin instructions..."
-                                          class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-none font-medium text-slate-800 text-xs focus:ring-2 focus:ring-indigo-500 resize-none"></textarea>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- MIDDLE COLUMN: Service Catalog (col-span-5) -->
-                <div class="lg:col-span-5 bg-white rounded-none border border-slate-200 p-5 shadow-sm space-y-4">
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-2.5">
-                            <span class="w-6 h-6 rounded-none bg-indigo-600 text-white font-black text-xs flex items-center justify-center">3</span>
-                            <h3 class="font-extrabold text-sm text-slate-900 heading-font">Select Treatments & Ad Ons</h3>
-                        </div>
-                        <span class="text-xs font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-none border border-indigo-100">
-                            Click to Add / Remove
-                        </span>
-                    </div>
-
-                    <!-- Search Filter Bar -->
-                    <div class="relative">
-                        <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                        </span>
-                        <input type="text" x-model="serviceSearchQuery" placeholder="Search treatments, ad ons, facial..." 
-                               class="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-none text-xs font-semibold focus:ring-2 focus:ring-indigo-500">
-                    </div>
-
-                    <!-- Category Pills Horizontal Scroll -->
-                    <div class="flex items-center gap-1.5 overflow-x-auto pb-1.5 no-scrollbar">
-                        <button type="button" @click="activeCategory = 'All Services'"
-                                :class="activeCategory === 'All Services' ? 'bg-indigo-600 text-white font-black' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 font-bold border border-slate-200'"
-                                class="px-3.5 py-1.5 text-xs rounded-none whitespace-nowrap transition-all">
-                            All Treatments
-                        </button>
-                        <template x-for="cat in serviceCategories" :key="cat.id">
-                            <button type="button" @click="activeCategory = cat.title"
-                                    :class="activeCategory === cat.title ? 'bg-indigo-600 text-white font-black' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 font-bold border border-slate-200'"
-                                    class="px-3.5 py-1.5 text-xs rounded-none whitespace-nowrap transition-all"
-                                    x-text="cat.title">
-                            </button>
-                        </template>
-                    </div>
-
-                    <!-- Services Grid Display -->
-                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-1 max-h-[620px] overflow-y-auto pr-1">
-                        <template x-for="srv in getFilteredServices()" :key="srv.id">
-                            <div @click="toggleService(srv)"
-                                 :class="isServiceSelected(srv.id) ? 'ring-2 ring-indigo-600 border-indigo-600 bg-indigo-50/40' : 'border-slate-200 hover:border-indigo-400 bg-white'"
-                                 class="border rounded-none p-3 cursor-pointer transition-all flex flex-col justify-between group shadow-2xs relative">
-                                <div class="space-y-2">
-                                    <div class="w-full aspect-[4/3] rounded-none overflow-hidden bg-slate-100 relative">
-                                        <img :src="getImageUrl(srv)" 
-                                             x-on:error="$el.src = 'https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&w=400&q=80'"
-                                             class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
-                                             :alt="srv.title">
-                                        
-                                        <!-- Active Cart Quantity Badge -->
-                                        <div x-show="getServiceCartQuantity(srv.id) > 0" class="absolute top-2 right-2 bg-indigo-600 text-white px-2 py-0.5 text-[10px] font-black rounded-none shadow-md flex items-center gap-1">
-                                            <span>✓ Qty:</span>
-                                            <span x-text="getServiceCartQuantity(srv.id)"></span>
-                                        </div>
-                                    </div>
-                                    <h4 class="font-bold text-xs text-slate-900 leading-snug line-clamp-2" x-text="srv.title">Hair Cut</h4>
-                                </div>
-                                <div class="mt-2.5 pt-2 border-t border-slate-100 space-y-2">
-                                    <div class="flex items-center justify-between">
-                                        <span class="text-[10px] text-slate-400 font-semibold uppercase">Price</span>
-                                        <p class="font-black text-xs text-indigo-600">PKR <span x-text="Number(srv.discounted_price || srv.price).toLocaleString()">500</span></p>
-                                    </div>
-
-                                    <!-- Quick Multi-Quantity Buttons on Service Card -->
-                                    <div x-show="getServiceCartQuantity(srv.id) > 0" class="flex items-center justify-between bg-white border border-indigo-200 p-1 text-xs">
-                                        <button type="button" @click="decrementService(srv, $event)" class="w-6 h-6 flex items-center justify-center bg-slate-100 hover:bg-rose-100 hover:text-rose-700 text-slate-700 font-black text-xs transition-colors">
-                                            -
-                                        </button>
-                                        <span class="font-black text-xs text-indigo-700 px-1" x-text="'Qty: ' + getServiceCartQuantity(srv.id)"></span>
-                                        <button type="button" @click="incrementService(srv, $event)" class="w-6 h-6 flex items-center justify-center bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 font-black text-xs transition-colors">
-                                            +
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </template>
-                    </div>
-                </div>
-
-                <!-- RIGHT COLUMN: Bill Summary, Discount, Clearance & Checkout (col-span-4) -->
-                <div class="lg:col-span-4 bg-white rounded-none border border-slate-200 p-5 shadow-sm space-y-4">
-                    <div class="flex items-center justify-between border-b border-slate-100 pb-3">
-                        <div class="flex items-center gap-2.5">
-                            <span class="w-6 h-6 rounded-none bg-indigo-600 text-white font-black text-xs flex items-center justify-center">4</span>
-                            <h3 class="font-extrabold text-sm text-slate-900 heading-font">Bill & Clearance Summary</h3>
-                        </div>
-                        <span class="text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-none border border-slate-200" x-text="items.length + ' Service(s)'"></span>
-                    </div>
-
-                    <!-- Selected Services Table (SERVICE TITLE | PRICE * QTY = NET TOTAL) -->
-                    <div class="overflow-x-auto min-h-[110px] max-h-[250px] overflow-y-auto border border-slate-200/80 bg-slate-50/30">
-                        <table class="w-full text-left text-xs border-collapse">
-                            <thead>
-                                <tr class="bg-slate-100 border-b border-slate-200 text-slate-500 font-extrabold text-[10px] uppercase tracking-wider">
-                                    <th class="py-2 px-2.5">Service Title</th>
-                                    <th class="py-2 px-2 text-right">Price</th>
-                                    <th class="py-2 px-1 text-center w-20">Qty</th>
-                                    <th class="py-2 px-2.5 text-right">Net Total</th>
-                                    <th class="py-2 px-1 text-center w-6"></th>
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y divide-slate-200/70 font-semibold text-slate-700 bg-white">
-                                <template x-for="(item, idx) in items" :key="idx">
-                                    <tr class="hover:bg-slate-50/80 transition-colors">
-                                        <!-- Service Title -->
-                                        <td class="py-2 px-2.5 align-middle">
-                                            <!-- Standard Service Title -->
-                                            <template x-if="!isAddOn(item)">
-                                                <div>
-                                                    <span x-text="item.service_obj ? item.service_obj.title : 'Service'" class="block font-bold text-slate-900 text-xs truncate max-w-[120px]">Service</span>
-                                                </div>
-                                            </template>
-
-                                            <!-- Editable Ad-On Service Name -->
-                                            <template x-if="isAddOn(item)">
-                                                <div class="space-y-1">
-                                                    <span class="px-1.5 py-0.2 text-[9px] font-black bg-amber-100 text-amber-900 border border-amber-200 uppercase inline-block">Ad-On</span>
-                                                    <input type="text" x-model="item.custom_title" placeholder="Custom Service..." 
-                                                           class="w-full px-1.5 py-1 bg-amber-50/60 border border-amber-300 text-xs font-bold text-slate-900 rounded-none focus:ring-1 focus:ring-indigo-500">
-                                                </div>
-                                            </template>
-                                        </td>
-
-                                        <!-- Unit Price -->
-                                        <td class="py-2 px-2 text-right align-middle whitespace-nowrap">
-                                            <!-- Standard Fixed Price -->
-                                            <template x-if="!isAddOn(item)">
-                                                <span class="font-bold text-slate-700 text-xs">PKR <span x-text="Number(item.price).toLocaleString()">0</span></span>
-                                            </template>
-
-                                            <!-- Editable Ad-On Price -->
-                                            <template x-if="isAddOn(item)">
-                                                <input type="number" step="any" x-model.number="item.price" @input="recalculateDiscount()" placeholder="0"
-                                                       class="w-16 px-1.5 py-1 text-right bg-amber-50/60 border border-amber-300 text-xs font-black text-slate-900 rounded-none focus:ring-1 focus:ring-indigo-500">
-                                            </template>
-                                        </td>
-
-                                        <!-- Quantity Stepper Controls (* Qty) -->
-                                        <td class="py-2 px-1 text-center align-middle whitespace-nowrap">
-                                            <div class="inline-flex items-center border border-slate-300 bg-white shadow-2xs">
-                                                <button type="button" 
-                                                        @click="if(parseInt(item.quantity) > 1) { item.quantity = parseInt(item.quantity) - 1; recalculateDiscount(); } else { removeItem(idx); }" 
-                                                        class="w-5 h-5 flex items-center justify-center text-slate-500 hover:bg-rose-50 hover:text-rose-600 font-black text-xs transition-colors">
-                                                    -
-                                                </button>
-                                                <input type="number" min="1" 
-                                                       x-model.number="item.quantity" 
-                                                       @input="if(!item.quantity || parseInt(item.quantity) < 1) item.quantity = 1; recalculateDiscount()" 
-                                                       class="w-7 h-5 text-center text-xs font-black border-x border-slate-300 p-0 focus:outline-none focus:bg-indigo-50">
-                                                <button type="button" 
-                                                        @click="item.quantity = (parseInt(item.quantity) || 1) + 1; recalculateDiscount()" 
-                                                        class="w-5 h-5 flex items-center justify-center text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 font-black text-xs transition-colors">
-                                                    +
-                                                </button>
-                                            </div>
-                                        </td>
-
-                                        <!-- Net Total (= Net Total) -->
-                                        <td class="py-2 px-2.5 text-right align-middle whitespace-nowrap">
-                                            <span class="font-black text-indigo-700 text-xs">PKR <span x-text="Number((parseFloat(item.price) || 0) * (parseInt(item.quantity) || 1)).toLocaleString()">0</span></span>
-                                        </td>
-
-                                        <!-- Remove Row Action -->
-                                        <td class="py-2 px-1 text-center align-middle">
-                                            <button type="button" @click="removeItem(idx)" class="text-slate-300 hover:text-rose-600 transition-colors p-1" title="Remove Service">
-                                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                                            </button>
-                                        </td>
-                                    </tr>
-                                </template>
-                                <tr x-show="items.length === 0">
-                                    <td colspan="5" class="py-8 text-center text-slate-400 font-medium">
-                                        No services in cart. Click treatments from the middle catalog to add.
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <!-- PROMINENT DEDICATED BILL DISCOUNT BOX -->
-                    <div class="p-3.5 bg-rose-50/40 border border-rose-200 rounded-none space-y-2.5">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center gap-1.5">
-                                <svg class="w-4 h-4 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path></svg>
-                                <label class="text-xs font-black text-slate-900 uppercase tracking-wider">Bill Discount</label>
-                            </div>
-
-                            <!-- Discount Mode Switcher (% vs Flat PKR) -->
-                            <div class="inline-flex rounded-none border border-slate-300 p-0.5 bg-white shrink-0">
-                                <button type="button" @click="discountType = 'percentage'; recalculateDiscount()"
-                                        :class="discountType === 'percentage' ? 'bg-indigo-600 text-white font-black shadow-xs' : 'text-slate-600 font-bold hover:bg-slate-100'"
-                                        class="px-2.5 py-0.5 text-[11px] rounded-none transition-all">
-                                    % Percent
-                                </button>
-                                <button type="button" @click="discountType = 'fixed'; recalculateDiscount()"
-                                        :class="discountType === 'fixed' ? 'bg-indigo-600 text-white font-black shadow-xs' : 'text-slate-600 font-bold hover:bg-slate-100'"
-                                        class="px-2.5 py-0.5 text-[11px] rounded-none transition-all">
-                                    PKR Flat
-                                </button>
-                            </div>
-                        </div>
-
-                        <div class="space-y-2.5">
-                            <!-- Custom Discount Input Field (Available for Everyone) -->
-                            <div class="relative">
-                                <!-- Percentage Input -->
-                                <div x-show="discountType === 'percentage'" class="relative">
-                                    <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-xs font-black text-slate-400">%</span>
-                                    <input type="number" step="any" min="0" max="100" 
-                                           x-model.number="discountPercentage" 
-                                           @input="recalculateDiscount()"
-                                           placeholder="Enter discount percentage (e.g. 10)" 
-                                           class="w-full pl-9 pr-4 py-2 bg-white border border-rose-300 text-xs font-black text-slate-900 rounded-none focus:ring-2 focus:ring-rose-500">
-                                </div>
-
-                                <!-- Flat PKR Input -->
-                                <div x-show="discountType === 'fixed'" class="relative" x-cloak>
-                                    <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-xs font-black text-slate-400">PKR</span>
-                                    <input type="number" step="any" min="0" 
-                                           x-model.number="billDiscount" 
-                                           @input="recalculateDiscount()"
-                                           placeholder="Enter discount amount in PKR" 
-                                           class="w-full pl-9 pr-4 py-2 bg-white border border-rose-300 text-xs font-black text-slate-900 rounded-none focus:ring-2 focus:ring-rose-500">
-                                </div>
-                            </div>
-
-                            <!-- Live Discount Amount Preview -->
-                            <div class="flex items-center justify-between text-[11px] font-bold pt-0.5">
-                                <span class="text-rose-700">
-                                    Deducts: <strong class="font-black text-rose-800">PKR <span x-text="getCalculatedDiscount().toLocaleString()">0</span></strong>
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Totals Breakdown -->
-                    <div class="space-y-2 pt-1 border-t border-slate-100 text-xs font-bold text-slate-600">
-                        <div class="flex items-center justify-between">
-                            <span>Subtotal (Gross)</span>
-                            <span class="text-slate-900 font-bold">PKR <span x-text="getSubtotal().toLocaleString()">0</span></span>
-                        </div>
-
-                        <div class="flex items-center justify-between text-rose-600" x-show="getCalculatedDiscount() > 0">
-                            <div class="flex items-center gap-1.5">
-                                <span>Discount Applied</span>
-                                <span class="px-1.5 py-0.5 bg-rose-100 text-rose-800 font-black text-[10px] rounded-none border border-rose-200" x-text="discountPercentage + '%'">0%</span>
-                            </div>
-                            <span class="font-extrabold">- PKR <span x-text="getCalculatedDiscount().toLocaleString()">0</span></span>
-                        </div>
-
-                        <!-- Card / Bank Surcharge Fee Line -->
-                        <div class="flex items-center justify-between" x-show="getExtraFee() > 0">
-                            <div class="flex items-center gap-1.5">
-                                <span class="text-indigo-700 font-bold">Card Surcharge Fee:</span>
-                                <span class="px-1.5 py-0.5 bg-indigo-100 text-indigo-800 font-black text-[10px] rounded-none border border-indigo-200" x-text="(parseFloat(extraPercentage) || 0) + '%'">0%</span>
-                            </div>
-                            <span class="text-indigo-700 font-black">+ PKR <span x-text="getExtraFee().toLocaleString()">0</span></span>
-                        </div>
-
-                        <div class="flex items-center justify-between pt-2 border-t border-slate-200">
-                            <span class="font-extrabold text-sm text-slate-900">Total Net Bill</span>
-                            <span class="font-black text-2xl text-indigo-600">PKR <span x-text="getTotalAmount().toLocaleString()">0</span></span>
-                        </div>
-                    </div>
-
-                    <!-- PAYMENT METHOD SELECTOR -->
-                    <div class="space-y-2 pt-1">
-                        <label class="block text-xs font-bold text-slate-700">Payment Mode</label>
-                        <div class="grid grid-cols-4 gap-2">
-                            <!-- Cash -->
-                            <button type="button" @click="paymentMode = 'Cash'; extraPercentage = 0; recalculateTotals()"
-                                    :class="paymentMode === 'Cash' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 font-black' : 'border-slate-200 text-slate-600 font-bold bg-white hover:bg-slate-50'"
-                                    class="p-2 border rounded-none text-xs flex flex-col items-center gap-1 transition-all">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-                                <span>Cash</span>
-                            </button>
-                            <!-- Card -->
-                            <button type="button" @click="paymentMode = 'Card'; recalculateTotals()"
-                                    :class="paymentMode === 'Card' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 font-black ring-1 ring-indigo-500' : 'border-slate-200 text-slate-600 font-bold bg-white hover:bg-slate-50'"
-                                    class="p-2 border rounded-none text-xs flex flex-col items-center gap-1 transition-all">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
-                                <span>Card</span>
-                            </button>
-                            <!-- Bank -->
-                            <button type="button" @click="paymentMode = 'Bank'; recalculateTotals()"
-                                    :class="paymentMode === 'Bank' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 font-black' : 'border-slate-200 text-slate-600 font-bold bg-white hover:bg-slate-50'"
-                                    class="p-2 border rounded-none text-xs flex flex-col items-center gap-1 transition-all">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
-                                <span>Bank</span>
-                            </button>
-                            <!-- Other -->
-                            <button type="button" @click="paymentMode = 'Other'; extraPercentage = 0; recalculateTotals()"
-                                    :class="paymentMode === 'Other' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 font-black' : 'border-slate-200 text-slate-600 font-bold bg-white hover:bg-slate-50'"
-                                    class="p-2 border rounded-none text-xs flex flex-col items-center gap-1 transition-all">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                <span>Other</span>
-                            </button>
-                        </div>
-
-                        <!-- Card Surcharge Percentage Input Field & Quick Buttons -->
-                        <div x-show="paymentMode === 'Card' || paymentMode === 'Bank'" class="p-3 bg-indigo-50/70 border border-indigo-200 space-y-2">
-                            <div class="flex items-center justify-between">
-                                <label class="block text-[11px] font-bold text-indigo-900 flex items-center gap-1">
-                                    <svg class="w-3.5 h-3.5 text-indigo-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
-                                    <span>Card / Bank Processing Charges (%)</span>
-                                </label>
-                                <div class="flex items-center gap-1">
-                                    <button type="button" @click="extraPercentage = 1.5; recalculateTotals()" class="px-1.5 py-0.5 text-[10px] font-bold bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-100 transition-colors">1.5%</button>
-                                    <button type="button" @click="extraPercentage = 2; recalculateTotals()" class="px-1.5 py-0.5 text-[10px] font-bold bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-100 transition-colors">2%</button>
-                                    <button type="button" @click="extraPercentage = 2.5; recalculateTotals()" class="px-1.5 py-0.5 text-[10px] font-bold bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-100 transition-colors">2.5%</button>
-                                    <button type="button" @click="extraPercentage = 3; recalculateTotals()" class="px-1.5 py-0.5 text-[10px] font-bold bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-100 transition-colors">3%</button>
-                                    <button type="button" @click="extraPercentage = 0; recalculateTotals()" class="px-1.5 py-0.5 text-[10px] font-bold bg-white border border-slate-200 text-slate-500 hover:bg-rose-50 hover:text-rose-600 transition-colors">0%</button>
-                                </div>
-                            </div>
-                            <div class="relative">
-                                <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-xs font-black text-indigo-500">%</span>
-                                <input type="number" step="any" min="0" max="100" x-model.number="extraPercentage" @input="recalculateTotals()" placeholder="Enter card surcharge % (e.g. 2)" 
-                                       class="w-full pl-8 pr-3 py-1.5 bg-white border border-indigo-300 text-xs font-black text-indigo-900 rounded-none focus:ring-1 focus:ring-indigo-600">
-                            </div>
-                            <div class="flex items-center justify-between text-[11px] font-bold text-indigo-900 pt-0.5" x-show="getExtraFee() > 0">
-                                <span>Processing Fee Added:</span>
-                                <span class="font-black text-indigo-700">+ PKR <span x-text="getExtraFee().toLocaleString()">0</span> <span class="text-[10px] font-semibold text-indigo-500" x-text="'(' + extraPercentage + '%)'"></span></span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- PAYMENT STATUS & CLEARANCE BOX -->
-                    <div class="p-3.5 bg-slate-50 border border-slate-200 space-y-3 rounded-none">
-                        <div class="flex items-center justify-between text-xs font-bold">
-                            <span class="text-slate-800 uppercase tracking-wider text-[11px] font-black flex items-center gap-1.5">
-                                <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-                                <span>Payment & Settlement</span>
-                            </span>
-                            <template x-if="!isAlreadyFullyCleared()">
-                                <button type="button" @click="clearFullRemainingBalance()" class="text-[11px] font-black text-indigo-600 hover:text-indigo-800 underline">
-                                    ⚡ Clear Full Balance
-                                </button>
-                            </template>
-                        </div>
-
-                        <!-- WHEN EDITING: Prominently show Already Paid and Still Pending Amount -->
-                        <template x-if="editingAppointmentId">
-                            <div class="p-3 bg-white border border-slate-200 space-y-2 text-xs">
-                                <div class="flex items-center justify-between font-bold">
-                                    <span class="text-slate-600">Already Paid Amount:</span>
-                                    <span class="text-emerald-700 font-black bg-emerald-50 px-2.5 py-0.5 border border-emerald-200">
-                                        PKR <span x-text="getAlreadyPaid().toLocaleString()">0</span>
-                                    </span>
-                                </div>
-                                <div class="flex items-center justify-between font-bold border-t border-slate-100 pt-1.5">
-                                    <span class="text-slate-600">Still Pending Amount:</span>
-                                    <span class="px-2.5 py-0.5 border font-black" 
-                                          :class="getInitialPendingBeforePay() > 0 ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'"
-                                          x-text="getInitialPendingBeforePay() > 0 ? ('PKR ' + getInitialPendingBeforePay().toLocaleString() + ' Due') : 'Cleared (PKR 0)'">
-                                    </span>
-                                </div>
-                            </div>
-                        </template>
-
-                        <!-- Payment Input Field -->
-                        <div class="space-y-1.5">
-                            <template x-if="editingAppointmentId">
-                                <div>
-                                    <label class="block text-xs font-bold text-slate-700 flex items-center justify-between">
-                                        <span>Collect Additional Payment (PKR)</span>
-                                        <template x-if="isAlreadyFullyCleared()">
-                                            <span class="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.2 border border-emerald-200">🔒 Disabled (Bill Already Paid)</span>
-                                        </template>
-                                    </label>
-                                    <input type="number" step="any" 
-                                           x-model.number="additionalPayment" 
-                                           :disabled="isAlreadyFullyCleared()"
-                                           :placeholder="isAlreadyFullyCleared() ? '0 (Fully Paid)' : 'Enter amount to collect...'" 
-                                           :class="isAlreadyFullyCleared() ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-white text-slate-900 border-slate-300 focus:ring-2 focus:ring-indigo-500'"
-                                           class="w-full px-3.5 py-2.5 text-xs font-black rounded-none border">
-                                </div>
-                            </template>
-                            <template x-if="!editingAppointmentId">
-                                <div>
-                                    <label class="block text-xs font-bold text-slate-700">Amount Received (PKR)</label>
-                                    <input type="number" step="any" x-model.number="receivedAmount" placeholder="0" 
-                                           class="w-full px-3.5 py-2.5 bg-white border border-slate-300 text-xs font-black text-slate-900 focus:ring-2 focus:ring-indigo-500 rounded-none">
-                                </div>
-                            </template>
-                        </div>
-
-                        <!-- Live Settlement Results -->
-                        <div class="pt-2 space-y-1.5 text-xs font-bold border-t border-slate-200">
-                            <div class="flex items-center justify-between text-slate-600">
-                                <span>Total Paid:</span>
-                                <span class="text-slate-900 font-extrabold">PKR <span x-text="getTotalPaidAmount().toLocaleString()">0</span></span>
-                            </div>
-
-                            <div class="flex items-center justify-between" x-show="getStillPendingAmount() > 0">
-                                <span class="text-rose-600 font-bold">Remaining Balance Due:</span>
-                                <span class="text-sm font-black text-rose-600">PKR <span x-text="getStillPendingAmount().toLocaleString()">0</span></span>
-                            </div>
-
-                            <div class="flex items-center justify-between" x-show="getChangeReturn() > 0">
-                                <span class="text-emerald-700 font-bold">Change Return / Excess:</span>
-                                <span class="text-sm font-black text-emerald-700">PKR <span x-text="getChangeReturn().toLocaleString()">0</span></span>
-                            </div>
-
-                            <div class="flex items-center justify-between text-emerald-700 pt-0.5" x-show="getStillPendingAmount() === 0">
-                                <span class="font-bold">Bill Status:</span>
-                                <span class="text-xs font-black bg-emerald-100 text-emerald-900 px-2 py-0.5 border border-emerald-300">✓ 100% Cleared & Paid</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Action Buttons (Hold, Preview Receipt, Save & Print 80mm, Complete) -->
-                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2">
-                        <button type="button" @click="holdCurrentBill()" 
-                                class="py-3 px-2 bg-amber-50 hover:bg-amber-100 text-amber-900 font-extrabold text-xs rounded-none transition-all flex items-center justify-center gap-1 border border-amber-300 shadow-2xs">
-                            <svg class="w-4 h-4 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                            <span>Hold</span>
-                        </button>
-                        <button type="button" @click="openReceiptModal()" 
-                                class="py-3 px-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold text-xs rounded-none transition-all flex items-center justify-center gap-1 border border-slate-300 shadow-2xs">
-                            <svg class="w-4 h-4 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                            <span>Receipt</span>
-                        </button>
-                        <button type="button" @click="submitForm(true)" 
-                                class="py-3 px-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-none transition-all flex items-center justify-center gap-1 shadow-xs">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
-                            <span>Print 80mm</span>
-                        </button>
-                        <button type="button" @click="submitForm(false)" 
-                                class="py-3 px-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-none transition-all flex items-center justify-center gap-1 shadow-xs">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                            <span x-text="editingAppointmentId ? 'Update' : 'Complete'"></span>
-                        </button>
-                    </div>
-                </div>
-
-            </div>
-        </form>
-    </div>
-
-    <!-- TAB 2: ALL BOOKINGS HISTORY -->
-    <div x-show="activeTab === 'history'" class="space-y-5" x-cloak>
-
-        <!-- KPI Metrics (Online vs On-Site vs Staff Ranking) -->
+    <!-- ALL BOOKINGS HISTORY -->
+    <div class="space-y-5">
+                <!-- KPI Metrics (Interactive Clickable Filter Widgets) -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div class="bg-white p-4 border border-slate-200 rounded-none shadow-sm flex items-center justify-between">
-                <div>
-                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Bookings</span>
-                    <span class="text-2xl font-black text-slate-900 mt-1 block">{{ $appointments->total() }}</span>
+            <!-- 1. Total Bookings (Click to Show All) -->
+            <a href="{{ route('manager.appointments.index', array_merge(request()->except(['order_type', 'page']), ['tab' => 'history'])) }}" 
+               class="block p-4 rounded-none shadow-xs transition-all cursor-pointer group hover:shadow-md
+               {{ empty($orderType) ? 'bg-white border-2 border-slate-900 ring-2 ring-slate-900/10' : 'bg-white border border-slate-200 hover:border-slate-400' }}">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Bookings</span>
+                            @if(empty($orderType))
+                                <span class="px-1.5 py-0.2 bg-slate-900 text-white text-[9px] font-black rounded-none">ALL CHANNELS</span>
+                            @endif
+                        </div>
+                        <span class="text-2xl font-black text-slate-900 mt-1 block">{{ $totalBookingsCount ?? $appointments->total() }}</span>
+                        <span class="text-[10px] font-bold text-slate-400 group-hover:text-indigo-600 transition-colors">Click to reset & show all &rarr;</span>
+                    </div>
+                    <div class="p-3 bg-slate-100 text-slate-700 rounded-none group-hover:bg-slate-200 transition-colors">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+                    </div>
                 </div>
-                <div class="p-3 bg-slate-100 text-slate-700 rounded-none">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
-                </div>
-            </div>
+            </a>
 
-            <div class="bg-white p-4 border border-cyan-200 rounded-none shadow-sm flex items-center justify-between bg-cyan-50/20">
-                <div>
-                    <span class="text-[10px] font-black text-cyan-800 uppercase tracking-wider block">🌐 Online Bookings</span>
-                    <span class="text-2xl font-black text-cyan-700 mt-1 block">{{ $onlineBookingsCount }}</span>
+            <!-- 2. Online Bookings (Click to Filter Website Bookings) -->
+            <a href="{{ route('manager.appointments.index', array_merge(request()->except(['page']), ['order_type' => 'Online', 'tab' => 'history'])) }}" 
+               class="block p-4 rounded-none shadow-xs transition-all cursor-pointer group hover:shadow-md
+               {{ $orderType === 'Online' ? 'bg-cyan-50 border-2 border-cyan-600 ring-2 ring-cyan-500/20 shadow-md' : 'bg-white border border-cyan-200 hover:border-cyan-400 bg-cyan-50/20' }}">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-[10px] font-black text-cyan-800 uppercase tracking-wider block">🌐 Online Bookings</span>
+                            @if($orderType === 'Online')
+                                <span class="px-1.5 py-0.2 bg-cyan-600 text-white text-[9px] font-black rounded-none animate-pulse">FILTER ACTIVE</span>
+                            @endif
+                        </div>
+                        <span class="text-2xl font-black text-cyan-700 mt-1 block">{{ $onlineBookingsCount }}</span>
+                        <span class="text-[10px] font-bold text-cyan-600 group-hover:text-cyan-800 transition-colors">Click to filter Online bookings &rarr;</span>
+                    </div>
+                    <div class="p-3 bg-cyan-100 text-cyan-700 rounded-none group-hover:bg-cyan-200 transition-colors">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
+                    </div>
                 </div>
-                <div class="p-3 bg-cyan-100 text-cyan-700 rounded-none">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
-                </div>
-            </div>
+            </a>
 
-            <div class="bg-white p-4 border border-indigo-200 rounded-none shadow-sm flex items-center justify-between bg-indigo-50/20">
-                <div>
-                    <span class="text-[10px] font-black text-indigo-800 uppercase tracking-wider block">🏢 On-Site POS</span>
-                    <span class="text-2xl font-black text-indigo-700 mt-1 block">{{ $onSiteBookingsCount }}</span>
+            <!-- 3. On-Site POS (Click to Filter POS Bookings) -->
+            <a href="{{ route('manager.appointments.index', array_merge(request()->except(['page']), ['order_type' => 'On Site', 'tab' => 'history'])) }}" 
+               class="block p-4 rounded-none shadow-xs transition-all cursor-pointer group hover:shadow-md
+               {{ $orderType === 'On Site' ? 'bg-indigo-50 border-2 border-indigo-600 ring-2 ring-indigo-500/20 shadow-md' : 'bg-white border border-indigo-200 hover:border-indigo-400 bg-indigo-50/20' }}">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-[10px] font-black text-indigo-800 uppercase tracking-wider block">🏢 On-Site POS</span>
+                            @if($orderType === 'On Site')
+                                <span class="px-1.5 py-0.2 bg-indigo-600 text-white text-[9px] font-black rounded-none animate-pulse">FILTER ACTIVE</span>
+                            @endif
+                        </div>
+                        <span class="text-2xl font-black text-indigo-700 mt-1 block">{{ $onSiteBookingsCount }}</span>
+                        <span class="text-[10px] font-bold text-indigo-600 group-hover:text-indigo-800 transition-colors">Click to filter POS bookings &rarr;</span>
+                    </div>
+                    <div class="p-3 bg-indigo-100 text-indigo-700 rounded-none group-hover:bg-indigo-200 transition-colors">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
+                    </div>
                 </div>
-                <div class="p-3 bg-indigo-100 text-indigo-700 rounded-none">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
-                </div>
-            </div>
+            </a>
 
-            <div class="bg-white p-4 border border-amber-200 rounded-none shadow-sm flex items-center justify-between bg-amber-50/30">
+            <!-- 4. Staff Service Ranking -->
+            <div class="bg-white p-4 border border-amber-200 rounded-none shadow-xs flex items-center justify-between bg-amber-50/30">
                 <div>
                     <span class="text-[10px] font-black text-amber-800 uppercase tracking-wider block">⭐ Staff Service Ranking</span>
                     <span class="text-2xl font-black text-amber-600 mt-1 block">
@@ -1329,7 +369,17 @@
 
         <!-- Filter & Search Bar -->
         <div class="bg-white p-4 border border-slate-200 rounded-none shadow-sm">
-            <form method="GET" action="{{ route('manager.appointments.index') }}" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+            <form method="GET" action="{{ route('manager.appointments.index') }}" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-3">
+                <input type="hidden" name="tab" value="history">
+
+                <!-- Channel Filter (Online vs On-Site) -->
+                <div>
+                    <select name="order_type" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-none text-xs font-bold text-slate-700 focus:ring-2 focus:ring-indigo-600">
+                        <option value="">All Channels</option>
+                        <option value="Online" {{ $orderType == 'Online' ? 'selected' : '' }}>🌐 Online Bookings</option>
+                        <option value="On Site" {{ $orderType == 'On Site' ? 'selected' : '' }}>🏢 On-Site POS</option>
+                    </select>
+                </div>
                 <div class="relative">
                     <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
@@ -1396,19 +446,20 @@
         <!-- Appointments History Table -->
         <div class="bg-white border border-slate-200 rounded-none shadow-sm overflow-hidden">
             <div class="overflow-x-auto">
-                <table class="w-full text-left border-collapse">
+                <table class="w-full text-left border-collapse min-w-[1100px]">
                     <thead>
                         <tr class="bg-slate-50 border-b border-slate-200 text-slate-400 text-[10px] font-black uppercase tracking-wider">
                             <th class="py-4 px-4">Booking #</th>
                             <th class="py-4 px-4">Channel</th>
                             <th class="py-4 px-4">Client Name</th>
                             <th class="py-4 px-4">Assigned Staff & Ranking</th>
-                            <th class="py-4 px-4">Date</th>
+                            <th class="py-4 px-4">Apt & Booking Date</th>
                             <th class="py-4 px-4">Services / Ad-Ons</th>
                             <th class="py-4 px-4">Net Bill</th>
                             <th class="py-4 px-4">Paid Amount</th>
                             <th class="py-4 px-4">Remaining Balance</th>
                             <th class="py-4 px-4">Status</th>
+                            <th class="py-4 px-4 text-center">Payment Proof</th>
                             <th class="py-4 px-4 text-right">Actions</th>
                         </tr>
                     </thead>
@@ -1451,23 +502,35 @@
                                                 <span>{{ $apt->ranking }}.0</span>
                                             </div>
                                         @else
-                                            <button type="button" @click="openRateModal({{ json_encode($apt) }})" 
-                                                    class="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 hover:bg-amber-100 hover:border-amber-300 text-slate-600 hover:text-amber-800 border border-slate-200 text-[10px] font-bold transition-colors">
+                                            <a href="{{ route('manager.ratings.index') }}?appointment_id={{ $apt->id }}&employee_id={{ $apt->employee_id }}" 
+                                               class="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 hover:bg-amber-100 hover:border-amber-300 text-slate-600 hover:text-amber-800 border border-slate-200 text-[10px] font-bold transition-colors">
                                                 <span class="text-amber-500">★</span>
-                                                <span>Give Ranking</span>
-                                            </button>
+                                                <span>Staff Feedback</span>
+                                            </a>
                                         @endif
                                     </div>
                                 @else
-                                    <button type="button" @click="openRateModal({{ json_encode($apt) }})" 
-                                            class="text-[11px] text-slate-400 hover:text-indigo-600 font-medium italic underline">
-                                        + Assign & Rate Staff
-                                    </button>
+                                    <a href="{{ route('manager.ratings.index') }}?appointment_id={{ $apt->id }}" 
+                                       class="text-[11px] text-slate-400 hover:text-indigo-600 font-medium italic underline">
+                                        + Staff Feedback
+                                    </a>
                                 @endif
                             </td>
 
-                            <td class="py-4 px-4 font-bold text-slate-700">
-                                {{ $apt->appointment_date ? $apt->appointment_date->format('M d, Y') : '—' }}
+                            <td class="py-4 px-4 whitespace-nowrap">
+                                <div class="space-y-1">
+                                    <div class="flex items-center gap-1.5 font-bold text-slate-900 text-xs">
+                                        <span class="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">Apt</span>
+                                        <span>{{ $apt->appointment_date ? $apt->appointment_date->format('M d, Y') : '—' }}</span>
+                                        @if(!empty($apt->start_time))
+                                            <span class="text-[10.5px] font-semibold text-slate-500">({{ $apt->start_time }})</span>
+                                        @endif
+                                    </div>
+                                    <div class="flex items-center gap-1.5 text-slate-500 text-[11px] font-medium">
+                                        <span class="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 bg-slate-100 text-slate-600 border border-slate-200 shrink-0">Booked</span>
+                                        <span>{{ $apt->created_at ? $apt->created_at->format('M d, Y h:i A') : '—' }}</span>
+                                    </div>
+                                </div>
                             </td>
                             <td class="py-4 px-4">
                                 <div class="space-y-0.5">
@@ -1476,6 +539,9 @@
                                             <span>• {{ $item->custom_title ?: ($item->service->title ?? 'Service') }}</span>
                                             @if(($item->quantity ?? 1) > 1)
                                                 <span class="px-1.5 py-0.2 bg-indigo-100 text-indigo-800 text-[10px] font-black rounded-none">x{{ $item->quantity }}</span>
+                                            @endif
+                                            @if($item->discount > 0)
+                                                <span class="px-1 py-0.2 bg-rose-100 text-rose-800 text-[9px] font-black rounded-none">Disc: PKR {{ number_format($item->discount, 0) }}</span>
                                             @endif
                                         </p>
                                     @endforeach
@@ -1503,31 +569,73 @@
                                     {{ $apt->status }}
                                 </span>
                             </td>
+                            <!-- Payment Proof Column -->
+                            <td class="py-4 px-4 text-center">
+                                @php
+                                    $proofUrl = null;
+                                    if (!empty($apt->receipt_image)) {
+                                        $rawPath = $apt->receipt_image;
+                                        if (preg_match('#(?:https?://[^/]+)?/(?:public/)?((?:storage|uploads)/.+)#i', $rawPath, $m)) {
+                                            $proofUrl = asset($m[1]);
+                                        } elseif (\Illuminate\Support\Str::startsWith($rawPath, ['http://', 'https://'])) {
+                                            $proofUrl = $rawPath;
+                                        } else {
+                                            $proofUrl = asset(ltrim($rawPath, '/'));
+                                        }
+                                    }
+                                @endphp
+                                @if($proofUrl)
+                                    <div class="inline-flex items-center gap-1.5">
+                                        <button type="button" 
+                                                @click="openProofModal({{ $apt->id }}, '{{ $proofUrl }}', '{{ $apt->booking_no }}', '{{ addslashes($apt->customer->name ?? 'Online Client') }}', '{{ number_format($apt->net_amount, 2) }}', '{{ $apt->appointment_date ? $apt->appointment_date->format('M d, Y') : '' }} (Booked: {{ $apt->created_at ? $apt->created_at->format('M d, Y') : '' }})', '{{ $apt->order_type }}')"
+                                                class="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold text-[11px] rounded-none transition-all shadow-2xs cursor-pointer"
+                                                title="Click to view full payment slip attached by customer">
+                                            <svg class="w-3.5 h-3.5 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                                            <span>View Slip</span>
+                                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                        </button>
+                                        <a href="{{ $proofUrl }}" target="_blank" class="p-1 text-slate-400 hover:text-emerald-700 transition-colors" title="Open original slip in new tab">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                                        </a>
+                                    </div>
+                                @else
+                                    <div class="inline-flex items-center gap-1.5">
+                                        <span class="text-[10px] text-slate-400 font-semibold italic">— None —</span>
+                                        <button type="button" 
+                                                @click="openProofModal({{ $apt->id }}, '', '{{ $apt->booking_no }}', '{{ addslashes($apt->customer->name ?? 'Online Client') }}', '{{ number_format($apt->net_amount, 2) }}', '{{ $apt->appointment_date ? $apt->appointment_date->format('M d, Y') : '' }} (Booked: {{ $apt->created_at ? $apt->created_at->format('M d, Y') : '' }})', '{{ $apt->order_type }}')"
+                                                class="px-1.5 py-0.5 text-[10px] font-bold text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-colors cursor-pointer"
+                                                title="Attach customer payment proof / slip">
+                                            + Slip
+                                        </button>
+                                    </div>
+                                @endif
+                            </td>
                             <td class="py-4 px-4 text-right">
                                 <div class="flex items-center justify-end gap-1.5">
-                                    <button type="button" @click="openRateModal({{ json_encode($apt) }})" 
+                                    <button type="button" @click="openRateModal(getAppointmentById({{ $apt->id }}))" 
                                             class="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-[11px] rounded-none transition-colors border border-amber-200 inline-flex items-center gap-1"
                                             title="Rank / Rate Assigned Employee">
                                         <span class="text-amber-600">★</span>
                                         <span>Rank</span>
                                     </button>
-                                    <button type="button" @click="openReceiptModal({{ json_encode($apt) }})" 
+                                    <button type="button" @click="openReceiptModal(getAppointmentById({{ $apt->id }}))" 
                                             class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] rounded-none transition-colors border border-slate-300 inline-flex items-center gap-1"
                                             title="View & Print 80mm Receipt">
                                         <svg class="w-3.5 h-3.5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
                                         <span>Receipt</span>
                                     </button>
-                                    <button type="button" @click="loadAppointmentForEdit({{ json_encode($apt) }})" 
-                                            class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[11px] rounded-none transition-colors border border-indigo-200 inline-flex items-center gap-1">
+                                    <a href="{{ route('manager.appointments.edit', $apt->id) }}" 
+                                       class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[11px] rounded-none transition-colors border border-indigo-200 inline-flex items-center gap-1"
+                                       title="Edit booking in New Bill Terminal">
                                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                                         <span>Edit</span>
-                                    </button>
+                                    </a>
                                 </div>
                             </td>
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="11" class="py-8 text-center text-slate-400 font-semibold">No service booking records found matching the filters.</td>
+                            <td colspan="12" class="py-8 text-center text-slate-400 font-semibold">No service booking records found matching the filters.</td>
                         </tr>
                         @endforelse
                     </tbody>
@@ -1543,167 +651,13 @@
         </div>
     </div>
 
-    <!-- CLIENT SELECTION MODAL -->
-    <div x-show="customerModalOpen" class="fixed inset-0 z-50 overflow-y-auto" x-cloak>
-        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
-            <div class="fixed inset-0 transition-opacity bg-slate-900/60 backdrop-blur-xs" @click="customerModalOpen = false"></div>
-            <div class="inline-block w-full max-w-lg p-6 my-8 overflow-hidden text-left align-middle transition-all transform bg-white shadow-2xl rounded-none border border-slate-200 space-y-4">
-                <div class="flex items-center justify-between border-b border-slate-100 pb-3">
-                    <h3 class="text-base font-extrabold text-slate-900 heading-font">Select Client Account</h3>
-                    <button type="button" @click="customerModalOpen = false" class="text-slate-400 hover:text-slate-600">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                    </button>
-                </div>
-
-                <div class="relative">
-                    <input type="text" x-model="customerSearchQuery" placeholder="Search client by name or phone..." 
-                           class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-none text-xs font-semibold focus:ring-2 focus:ring-indigo-500">
-                </div>
-
-                <div class="max-h-72 overflow-y-auto space-y-2 divide-y divide-slate-100">
-                    <template x-for="cust in getFilteredCustomers()" :key="cust.id">
-                        <div @click="selectCustomer(cust)" 
-                             class="flex items-center justify-between p-3 hover:bg-indigo-50/50 rounded-none cursor-pointer transition-colors group">
-                            <div class="flex items-center gap-3">
-                                <div class="w-9 h-9 rounded-none bg-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
-                                    <span x-text="cust.name ? cust.name.substring(0, 2).toUpperCase() : 'CL'"></span>
-                                </div>
-                                <div>
-                                    <h4 class="font-bold text-xs text-slate-900 group-hover:text-indigo-600" x-text="cust.name">Client</h4>
-                                    <p class="text-[11px] text-slate-400" x-text="cust.phone_no1 || 'No Phone'"></p>
-                                </div>
-                            </div>
-                            <span class="text-xs font-bold text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity">Select &rarr;</span>
-                        </div>
-                    </template>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ADMIN AUTHORIZATION MODAL (FOR DISCOUNT > 10%) -->
-    <div x-show="adminAuthModalOpen" class="fixed inset-0 z-50 overflow-y-auto" x-cloak>
-        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
-            <div class="fixed inset-0 transition-opacity bg-slate-900/60 backdrop-blur-xs" @click="adminAuthModalOpen = false"></div>
-            <div class="inline-block w-full max-w-md p-6 my-8 overflow-hidden text-left align-middle transition-all transform bg-white shadow-2xl rounded-none border-2 border-rose-500 space-y-4">
-                <div class="flex items-center justify-between border-b border-slate-100 pb-3">
-                    <div class="flex items-center gap-2 text-rose-600 font-extrabold text-sm">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-                        <span>Admin Authorization Required</span>
-                    </div>
-                    <button type="button" @click="adminAuthModalOpen = false" class="text-slate-400 hover:text-slate-600">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                    </button>
-                </div>
-
-                <div class="space-y-2 text-xs text-slate-600">
-                    <p class="font-bold text-slate-800">
-                        This bill includes a discount of <span class="text-rose-600 font-black text-sm" x-text="discountPercentage + '%'"></span> which exceeds the allowed 10% limit.
-                    </p>
-                    <p>
-                        Please enter the <strong>Administrator Password</strong> to authorize and complete this booking.
-                    </p>
-                </div>
-
-                <div class="space-y-1">
-                    <label class="block text-xs font-bold text-slate-700">Admin Password</label>
-                    <input type="password" x-model="adminPassword" placeholder="Enter admin password..." 
-                           @keydown.enter.prevent="authorizeAdminAndSubmit()"
-                           class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-none text-xs font-bold text-slate-900 focus:ring-2 focus:ring-rose-500">
-                </div>
-
-                <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
-                    <button type="button" @click="adminAuthModalOpen = false" class="px-4 py-2 bg-slate-100 text-slate-600 font-bold text-xs rounded-none hover:bg-slate-200 border border-slate-200">
-                        Cancel
-                    </button>
-                    <button type="button" @click="authorizeAdminAndSubmit()" class="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded-none shadow-xs">
-                        Authorize & Complete
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- HELD APPOINTMENTS / BILLS MODAL -->
-    <div x-show="heldBillsModalOpen" class="fixed inset-0 z-50 overflow-y-auto" x-cloak>
-        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
-            <div class="fixed inset-0 transition-opacity bg-slate-900/60 backdrop-blur-xs" @click="heldBillsModalOpen = false"></div>
-            <div class="inline-block w-full max-w-2xl p-6 my-8 overflow-hidden text-left align-middle transition-all transform bg-white shadow-2xl rounded-none border border-slate-200 space-y-4">
-                <div class="flex items-center justify-between border-b border-slate-200 pb-3">
-                    <div class="flex items-center gap-2">
-                        <span class="text-xl">⏸️</span>
-                        <div>
-                            <h3 class="text-base font-extrabold text-slate-900 heading-font">Held Appointments & Bills</h3>
-                            <p class="text-[11px] text-slate-500 font-medium">Resume any held booking directly into the billing terminal</p>
-                        </div>
-                    </div>
-                    <button type="button" @click="heldBillsModalOpen = false" class="text-slate-400 hover:text-slate-600">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                    </button>
-                </div>
-
-                <!-- Empty State -->
-                <template x-if="heldBills.length === 0">
-                    <div class="py-12 text-center space-y-2">
-                        <div class="w-12 h-12 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto text-xl">⏸️</div>
-                        <p class="text-xs font-bold text-slate-700">No appointments currently on hold.</p>
-                        <p class="text-[11px] text-slate-400">Click "Hold Bill" in the billing terminal to park an appointment and resume it later.</p>
-                    </div>
-                </template>
-
-                <!-- List of Held Bills -->
-                <template x-if="heldBills.length > 0">
-                    <div class="space-y-3 max-h-[60vh] overflow-y-auto divide-y divide-slate-100">
-                        <template x-for="(held, index) in heldBills" :key="held.id">
-                            <div class="p-3.5 bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white transition-all">
-                                <div class="space-y-1">
-                                    <div class="flex items-center gap-2">
-                                        <span class="font-mono text-xs font-black text-indigo-700" x-text="held.billNo"></span>
-                                        <span class="text-[10px] font-bold text-slate-400" x-text="'• Held at ' + held.heldAt"></span>
-                                        <span class="px-1.5 py-0.2 bg-amber-100 text-amber-900 text-[10px] font-bold border border-amber-300">Held</span>
-                                    </div>
-                                    <div class="text-xs font-bold text-slate-900">
-                                        Client: <span x-text="held.clientName"></span>
-                                    </div>
-                                    <div class="text-[11px] text-slate-500 font-medium">
-                                        <span x-text="(held.items ? held.items.length : 0) + ' service(s)'"></span> &bull;
-                                        Total: <strong class="text-slate-900">PKR <span x-text="held.totalAmount ? held.totalAmount.toLocaleString() : '0'"></span></strong>
-                                    </div>
-                                </div>
-
-                                <div class="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                                    <button type="button" @click="resumeHeldBill(held)" 
-                                            class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-none transition-colors flex items-center gap-1.5 shadow-2xs">
-                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                        <span>Resume</span>
-                                    </button>
-                                    <button type="button" @click="discardHeldBill(held.id)" 
-                                            class="px-3 py-2 bg-white hover:bg-rose-50 text-rose-700 hover:text-rose-800 font-bold text-xs rounded-none border border-slate-300 hover:border-rose-300 transition-colors">
-                                        <span>Discard</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </template>
-                    </div>
-                </template>
-
-                <div class="flex items-center justify-end pt-3 border-t border-slate-100">
-                    <button type="button" @click="heldBillsModalOpen = false" class="px-4 py-2 bg-slate-100 text-slate-700 font-bold text-xs rounded-none hover:bg-slate-200">
-                        Close
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 80MM THERMAL RECEIPT PREVIEW & PRINT MODAL -->
     @php
         $brandSettings = \App\Models\Setting::getSettings();
     @endphp
     <div x-show="receiptModalOpen" class="fixed inset-0 z-50 overflow-y-auto" x-cloak>
         <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
             <div class="fixed inset-0 transition-opacity bg-slate-900/60 backdrop-blur-xs" @click="receiptModalOpen = false"></div>
-            <div class="inline-block w-full max-w-sm p-6 my-8 overflow-hidden text-left align-middle transition-all transform bg-white shadow-2xl rounded-none border border-slate-300 space-y-4">
+            <div class="inline-block w-full max-w-md p-6 my-8 overflow-hidden text-left align-middle transition-all transform bg-white shadow-2xl rounded-xl border border-slate-300 space-y-4">
                 <div class="flex items-center justify-between border-b border-slate-200 pb-3">
                     <div class="flex items-center gap-2">
                         <span class="text-lg">🖨️</span>
@@ -1715,150 +669,9 @@
                 </div>
 
                 <!-- Receipt Paper Simulation Container -->
-                <div class="bg-slate-50 p-4 border border-slate-200 shadow-inner max-h-[65vh] overflow-y-auto flex justify-center">
-                    <div id="pos80mmReceipt" class="pos-receipt-80mm-container bg-white p-3 border border-dashed border-slate-300 w-full max-w-[76mm] text-slate-900 font-mono text-[11px] leading-tight space-y-2">
-                        
-                        <!-- Header / Brand Info -->
-                        <div class="text-center space-y-0.5">
-                            <h2 class="text-base font-black tracking-wide uppercase">{{ $brandSettings->brand_name ?? 'JUGNU SALOON' }}</h2>
-                            @if(!empty($brandSettings->brand_slogan))
-                                <p class="text-[10px] text-slate-600 uppercase">{{ $brandSettings->brand_slogan }}</p>
-                            @endif
-                            @if(!empty($brandSettings->brand_address))
-                                <p class="text-[9px] text-slate-600">{{ $brandSettings->brand_address }}</p>
-                            @endif
-                            @if(!empty($brandSettings->brand_phone1) || !empty($brandSettings->brand_phone2))
-                                <p class="text-[9px] text-slate-600">Tel: {{ $brandSettings->brand_phone1 }} {{ $brandSettings->brand_phone2 ? '/ ' . $brandSettings->brand_phone2 : '' }}</p>
-                            @endif
-                        </div>
-
-                        <div class="border-t border-b border-black py-1 text-center font-bold text-[10px] uppercase">
-                            SERVICE BILL / CASH RECEIPT
-                        </div>
-
-                        <!-- Bill & Customer Metadata -->
-                        <div class="text-[10px] space-y-0.5 pt-0.5">
-                            <div class="flex justify-between">
-                                <span>Invoice #:</span>
-                                <span class="font-bold" x-text="receiptData ? receiptData.billNo : '—'"></span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span>Date & Time:</span>
-                                <span x-text="receiptData ? (receiptData.billDate + ' ' + (receiptData.billTime || '')) : '—'"></span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span>Channel:</span>
-                                <span class="font-bold uppercase" x-text="receiptData ? receiptData.orderType : 'On Site'"></span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span>Client:</span>
-                                <span class="font-bold" x-text="receiptData ? receiptData.customerName : 'Walk-in Client'"></span>
-                            </div>
-                            <template x-if="receiptData && receiptData.customerPhone">
-                                <div class="flex justify-between">
-                                    <span>Phone:</span>
-                                    <span x-text="receiptData.customerPhone"></span>
-                                </div>
-                            </template>
-                        </div>
-
-                        <!-- Items Table -->
-                        <div class="border-t border-black pt-1">
-                            <table class="w-full text-left text-[10px] font-mono">
-                                <thead>
-                                    <tr class="border-b border-black font-bold">
-                                        <th class="py-1 text-left">ITEM / SERVICE</th>
-                                        <th class="py-1 text-center w-8">QTY</th>
-                                        <th class="py-1 text-right w-14">PRICE</th>
-                                        <th class="py-1 text-right w-16">TOTAL</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="divide-y divide-dashed divide-slate-300">
-                                    <template x-for="(item, i) in (receiptData ? receiptData.items : [])" :key="i">
-                                        <tr>
-                                            <td class="py-1 text-left font-bold" x-text="item.title"></td>
-                                            <td class="py-1 text-center" x-text="item.quantity"></td>
-                                            <td class="py-1 text-right" x-text="Number(item.price).toLocaleString()"></td>
-                                            <td class="py-1 text-right font-bold" x-text="Number(item.total).toLocaleString()"></td>
-                                        </tr>
-                                    </template>
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <!-- Calculations Summary -->
-                        <div class="border-t border-black pt-1 space-y-0.5 text-[10px]">
-                            <div class="flex justify-between">
-                                <span>Subtotal (Gross):</span>
-                                <span>PKR <span x-text="receiptData ? Number(receiptData.subtotal).toLocaleString() : '0'"></span></span>
-                            </div>
-
-                            <template x-if="receiptData && receiptData.discount > 0">
-                                <div class="flex justify-between text-rose-700 font-bold">
-                                    <span>Discount <span x-text="receiptData.discountPercentage > 0 ? '(' + receiptData.discountPercentage + '%)' : ''">:</span></span>
-                                    <span>- PKR <span x-text="Number(receiptData.discount).toLocaleString()"></span></span>
-                                </div>
-                            </template>
-
-                            <template x-if="receiptData && receiptData.extraAmount > 0">
-                                <div class="flex justify-between font-bold">
-                                    <span>Card / Bank Fee <span x-text="receiptData.extraPercentage > 0 ? '(' + receiptData.extraPercentage + '%)' : ''">:</span></span>
-                                    <span>+ PKR <span x-text="Number(receiptData.extraAmount).toLocaleString()"></span></span>
-                                </div>
-                            </template>
-
-                            <div class="flex justify-between font-black text-xs border-t border-b border-black py-1 my-1">
-                                <span>TOTAL NET BILL:</span>
-                                <span>PKR <span x-text="receiptData ? Number(receiptData.netAmount).toLocaleString() : '0'"></span></span>
-                            </div>
-
-                            <div class="flex justify-between">
-                                <span>Payment Mode:</span>
-                                <span class="font-bold uppercase" x-text="receiptData ? receiptData.paymentMode : 'Cash'"></span>
-                            </div>
-
-                            <div class="flex justify-between font-bold">
-                                <span>Paid Amount:</span>
-                                <span>PKR <span x-text="receiptData ? Number(receiptData.paidAmount).toLocaleString() : '0'"></span></span>
-                            </div>
-
-                            <template x-if="receiptData && receiptData.balanceDue > 0">
-                                <div class="flex justify-between text-rose-700 font-black">
-                                    <span>Balance Remaining:</span>
-                                    <span>PKR <span x-text="Number(receiptData.balanceDue).toLocaleString()"></span> (DUE)</span>
-                                </div>
-                            </template>
-
-                            <template x-if="receiptData && receiptData.balanceDue <= 0">
-                                <div class="flex justify-between text-emerald-800 font-bold">
-                                    <span>Bill Status:</span>
-                                    <span>PAID IN FULL (CLEARED)</span>
-                                </div>
-                            </template>
-
-                            <template x-if="receiptData && receiptData.changeReturn > 0">
-                                <div class="flex justify-between text-emerald-700 font-bold">
-                                    <span>Change Return:</span>
-                                    <span>PKR <span x-text="Number(receiptData.changeReturn).toLocaleString()"></span></span>
-                                </div>
-                            </template>
-                        </div>
-
-                        <!-- Notes (if any) -->
-                        <template x-if="receiptData && receiptData.notes">
-                            <div class="border-t border-dashed border-slate-300 pt-1 text-[9px] text-slate-600">
-                                <strong>Notes:</strong> <span x-text="receiptData.notes"></span>
-                            </div>
-                        </template>
-
-                        <!-- Footer -->
-                        <div class="border-t border-black pt-2 text-center text-[9px] space-y-1">
-                            <p class="font-bold tracking-wider uppercase">*** THANK YOU FOR VISITING ***</p>
-                            <p class="text-[8px] text-slate-500">Please inspect your receipt before leaving.</p>
-                            <div class="pt-1 font-mono tracking-widest text-[10px] text-slate-400">||| | |||| || ||||| |||</div>
-                            <p class="text-[7px] text-slate-400">Powered by Jugnu Saloon Suite &bull; {{ date('Y') }}</p>
-                        </div>
-
+                <div class="bg-slate-100 p-4 border border-slate-200 shadow-inner max-h-[70vh] overflow-y-auto flex justify-center">
+                    <div id="pos80mmReceipt" class="pos-receipt-80mm-container bg-white p-4 border border-slate-300 shadow-sm w-full max-w-[80mm] text-black text-xs leading-normal space-y-2.5" style="font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif;">
+                        @include('manager.appointments._receipt_content')
                     </div>
                 </div>
 
@@ -1868,7 +681,7 @@
                             class="px-4 py-2 bg-slate-100 text-slate-700 font-bold text-xs rounded-none hover:bg-slate-200">
                         Close
                     </button>
-                    <button type="button" @click="print80mmReceiptDirect(null)" 
+                    <button type="button" @click="print80mmReceiptDirect()" 
                             class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-none transition-colors flex items-center gap-1.5 shadow-sm">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
                         <span>Print 80mm Receipt</span>
@@ -1877,6 +690,8 @@
             </div>
         </div>
     </div>
+
+
 
     <!-- MODAL: QUICK EMPLOYEE RANKING / RATING -->
     <div x-show="rateModalOpen" class="fixed inset-0 z-50 overflow-y-auto" x-cloak>
@@ -1968,5 +783,461 @@
         </div>
     </div>
 
+    <!-- MODAL: CUSTOMER PAYMENT PROOF SLIP LIGHTBOX -->
+
+
+    <div x-show="proofModalOpen" class="fixed inset-0 z-50 overflow-y-auto" x-cloak>
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 transition-opacity bg-slate-900/70 backdrop-blur-xs" @click="proofModalOpen = false"></div>
+            <div class="inline-block w-full max-w-2xl p-6 my-8 overflow-hidden text-left align-middle transition-all transform bg-white shadow-2xl rounded-none border border-slate-300 space-y-4">
+                
+                <div class="flex items-center justify-between border-b border-slate-200 pb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xl">📎</span>
+                        <div>
+                            <h3 class="text-base font-extrabold text-slate-900 heading-font">Customer Payment Proof / Slip</h3>
+                            <p class="text-xs text-slate-500 font-medium">Uploaded by client during online website booking</p>
+                        </div>
+                    </div>
+                    <button type="button" @click="proofModalOpen = false" class="text-slate-400 hover:text-slate-600">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </div>
+
+                <!-- Booking Quick Summary Header -->
+                <div class="p-3 bg-slate-50 border border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+                    <div>
+                        <span class="text-slate-400 block text-[10px]">Booking #:</span>
+                        <strong class="text-indigo-700 font-black" x-text="'#' + proofModalData.bookingNo"></strong>
+                    </div>
+                    <div>
+                        <span class="text-slate-400 block text-[10px]">Client:</span>
+                        <strong class="text-slate-900" x-text="proofModalData.clientName"></strong>
+                    </div>
+                    <div>
+                        <span class="text-slate-400 block text-[10px]">Net Bill:</span>
+                        <strong class="text-emerald-700 font-black" x-text="'PKR ' + proofModalData.amount"></strong>
+                    </div>
+                    <div>
+                        <span class="text-slate-400 block text-[10px]">Date:</span>
+                        <strong class="text-slate-700" x-text="proofModalData.date"></strong>
+                    </div>
+                </div>
+
+                <!-- Feedback Alerts inside Modal -->
+                <div x-show="proofModalData.uploadSuccess" x-cloak class="p-3 bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-bold flex items-center gap-2">
+                    <svg class="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    <span>Payment proof slip uploaded & updated successfully!</span>
+                </div>
+                <div x-show="proofModalData.errorMessage" x-cloak class="p-3 bg-rose-50 border border-rose-300 text-rose-800 text-xs font-bold flex items-center gap-2">
+                    <svg class="w-4 h-4 text-rose-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <span x-text="proofModalData.errorMessage"></span>
+                </div>
+
+                <!-- Slip Image Container (Scrollable & Scalable) -->
+                <div class="bg-slate-900/95 p-4 border border-slate-300 min-h-[260px] max-h-[60vh] overflow-auto flex flex-col items-center justify-center rounded-none shadow-inner relative">
+                    
+                    <!-- 1. Loading State -->
+                    <div x-show="proofModalData.imgLoading && proofModalData.url && !proofModalData.imgError" class="py-12 flex flex-col items-center gap-3 text-slate-400">
+                        <svg class="animate-spin w-8 h-8 text-indigo-400" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                        </svg>
+                        <span class="text-xs font-bold uppercase tracking-wider">Loading payment slip image...</span>
+                    </div>
+
+                    <!-- 2. Active Image Display -->
+                    <template x-if="proofModalData.url && !proofModalData.imgError">
+                        <img :src="proofModalData.url" alt="Customer Payment Slip" 
+                             x-on:load="proofModalData.imgLoading = false; proofModalData.imgError = false"
+                             x-on:error="proofModalData.imgLoading = false; proofModalData.imgError = true"
+                             class="max-w-full max-h-[55vh] object-contain shadow-2xl border border-slate-700 transition-opacity duration-300"
+                             :class="proofModalData.imgLoading ? 'opacity-0' : 'opacity-100'">
+                    </template>
+
+                    <!-- 3. Error / Missing File Fallback State -->
+                    <div x-show="proofModalData.imgError || !proofModalData.url" class="w-full max-w-md py-6 px-4 bg-white/95 rounded-none border border-slate-200 text-center space-y-4 my-auto shadow-md">
+                        <div class="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto text-xl">
+                            ⚠️
+                        </div>
+                        <div>
+                            <h4 class="text-sm font-extrabold text-slate-900 heading-font">Payment Slip Image Not Found</h4>
+                            <p class="text-xs text-slate-500 mt-1">
+                                The slip image for this booking is missing, link has expired, or customer has not yet attached it.
+                            </p>
+                        </div>
+
+                        <!-- Direct Inline Upload Box -->
+                        <div class="p-3 bg-slate-50 border border-dashed border-slate-300 space-y-2 text-left">
+                            <label class="block text-[11px] font-black text-slate-700 uppercase">
+                                Attach or Replace Slip File (PNG, JPG, PDF)
+                            </label>
+                            <input type="file" x-ref="slipFileInput" accept="image/png,image/jpeg,image/webp,application/pdf" 
+                                   class="block w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-none file:border-0 file:text-xs file:font-bold file:bg-slate-800 file:text-white hover:file:bg-black cursor-pointer">
+                            <button type="button" @click="uploadSlip($event)" :disabled="proofModalData.uploading"
+                                    class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white font-black text-xs rounded-none transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs">
+                                <template x-if="proofModalData.uploading">
+                                    <span class="inline-flex items-center gap-1">
+                                        <svg class="animate-spin w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
+                                        <span>Uploading Slip...</span>
+                                    </span>
+                                </template>
+                                <template x-if="!proofModalData.uploading">
+                                    <span>Upload & Attach Payment Slip</span>
+                                </template>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Replace Slip Toggle Section (when image is already visible) -->
+                <div x-show="proofModalData.showReplaceForm && !proofModalData.imgError && proofModalData.url" x-cloak class="p-3 bg-slate-50 border border-slate-200 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs font-black text-slate-800 uppercase">Replace Current Slip Image</label>
+                        <button type="button" @click="proofModalData.showReplaceForm = false" class="text-xs text-slate-400 hover:text-slate-600 font-bold">&times; Close</button>
+                    </div>
+                    <div class="flex flex-col sm:flex-row gap-2 items-center">
+                        <input type="file" x-ref="slipFileInput" accept="image/png,image/jpeg,image/webp,application/pdf" 
+                               class="w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-none file:border-0 file:text-xs file:font-bold file:bg-slate-800 file:text-white hover:file:bg-black cursor-pointer">
+                        <button type="button" @click="uploadSlip($event)" :disabled="proofModalData.uploading"
+                                class="shrink-0 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-none transition-colors flex items-center justify-center gap-1 shadow-xs cursor-pointer">
+                            <span>Upload New</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Modal Actions -->
+                <div class="flex items-center justify-between gap-2 pt-2 border-t border-slate-200">
+                    <button type="button" @click="proofModalOpen = false" 
+                            class="px-4 py-2 bg-slate-100 text-slate-700 font-bold text-xs rounded-none hover:bg-slate-200 cursor-pointer">
+                        Close
+                    </button>
+                    <div class="flex items-center gap-2">
+                        <template x-if="!proofModalData.imgError && proofModalData.url">
+                            <button type="button" @click="proofModalData.showReplaceForm = !proofModalData.showReplaceForm"
+                                    class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-none transition-colors inline-flex items-center gap-1 border border-slate-300 cursor-pointer">
+                                <span>🔄 Replace Slip</span>
+                            </button>
+                        </template>
+                        <template x-if="!proofModalData.imgError && proofModalData.url">
+                            <a :href="proofModalData.url" target="_blank" 
+                               class="px-4 py-2 bg-slate-900 hover:bg-black text-white font-bold text-xs rounded-none transition-colors inline-flex items-center gap-1.5 shadow-xs cursor-pointer">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                                <span>Open Full Resolution</span>
+                            </a>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DEDICATED 80MM THERMAL RECEIPT PRINT CONTAINER (RENDERED CLEANLY ON PRINT) -->
+
+
+    <!-- DEDICATED 80MM THERMAL RECEIPT PRINT CONTAINER (RENDERED CLEANLY ON PRINT) -->
+    <div id="posReceiptPrintMount" class="hidden print:block">
+        <div id="pos80mmReceiptPrint" class="pos-receipt-80mm-container bg-white p-0 text-black text-xs leading-normal space-y-2.5" style="font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif;">
+            @include('manager.appointments._receipt_content')
+        </div>
+    </div>
+
+
 </div>
+
+<script>
+window.buildAppointmentReceiptDocument = function(data, brand) {
+    if (!data) return '';
+    brand = brand || {};
+    const items = data.items || [];
+    let itemsRows = '';
+    items.forEach(it => {
+        const price = Number(it.price || 0).toLocaleString();
+        const disc = Number(it.discount || 0).toLocaleString();
+        const total = Number(it.total || 0).toLocaleString();
+        const itemDiscHtml = it.discountText ? `
+            <div style="font-size: 9.5px; font-weight: 400; color: #000;">${it.discountText}</div>
+        ` : '';
+        itemsRows += `
+            <tr style="border-bottom: 1px solid #000;">
+                <td style="padding: 3px 0; text-align: left; font-weight: 400; word-break: break-word; color: #000; font-size: 11.5px; line-height: 1.3;">
+                    ${it.title || 'Service'}
+                    ${itemDiscHtml}
+                </td>
+                <td style="padding: 3px 0; text-align: center; font-weight: 400; color: #000; font-size: 11.5px;">${it.quantity || 1}</td>
+                <td style="padding: 3px 0; text-align: right; font-weight: 400; color: #000; font-size: 11.5px;">${price}</td>
+                <td style="padding: 3px 0; text-align: right; font-weight: 400; color: #000; font-size: 11.5px;">${disc}</td>
+                <td style="padding: 3px 0; text-align: right; font-weight: 500; color: #000; font-size: 11.5px;">${total}</td>
+            </tr>
+        `;
+    });
+
+    let discountRows = '';
+    if (data.serviceDiscount > 0 && data.billDiscount > 0) {
+        discountRows = `
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px; color: #000; font-weight: 400; font-size: 11.5px;">
+                <span>Service Discount (Items):</span>
+                <span style="font-weight: 500;">- PKR ${Number(data.serviceDiscount).toLocaleString()}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px; color: #000; font-weight: 400; font-size: 11.5px;">
+                <span>Bill Discount:</span>
+                <span style="font-weight: 500;">- PKR ${Number(data.billDiscount).toLocaleString()}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px; color: #000; font-weight: 500; font-size: 11.5px;">
+                <span>Total Service Discount:</span>
+                <span style="font-weight: 500;">- PKR ${Number(data.discount).toLocaleString()}</span>
+            </div>
+        `;
+    } else if (data.discount > 0) {
+        discountRows = `
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px; color: #000; font-weight: 400; font-size: 11.5px;">
+                <span>Service Discount:</span>
+                <span style="font-weight: 500;">- PKR ${Number(data.discount).toLocaleString()}</span>
+            </div>
+        `;
+    }
+
+    const extraRow = data.extraAmount > 0 ? `
+        <div style="display: flex; justify-content: space-between; margin-bottom: 2px; font-weight: 400; font-size: 11.5px; color: #000;">
+            <span>Card / Bank Fee ${data.extraPercentage > 0 ? '(' + data.extraPercentage + '%)' : ''}:</span>
+            <span style="font-weight: 500;">+ PKR ${Number(data.extraAmount).toLocaleString()}</span>
+        </div>
+    ` : '';
+
+    const balanceRow = data.balanceDue > 0 ? `
+        <div style="display: flex; justify-content: space-between; margin-bottom: 2px; color: #000; font-weight: 600; font-size: 12px;">
+            <span>Balance Due:</span>
+            <span>PKR ${Number(data.balanceDue).toLocaleString()} (DUE)</span>
+        </div>
+    ` : `
+        <div style="display: flex; justify-content: space-between; margin-bottom: 2px; color: #000; font-weight: 500; font-size: 12px;">
+            <span>Bill Status:</span>
+            <span>PAID IN FULL (CLEARED)</span>
+        </div>
+    `;
+
+    const changeRow = data.changeReturn > 0 ? `
+        <div style="display: flex; justify-content: space-between; margin-bottom: 2px; color: #000; font-weight: 400; font-size: 11.5px;">
+            <span>Change Return:</span>
+            <span style="font-weight: 500;">PKR ${Number(data.changeReturn).toLocaleString()}</span>
+        </div>
+    ` : '';
+
+    const notesSection = data.notes ? `
+        <div style="border-top: 1px solid #000; margin-top: 5px; padding-top: 4px; font-size: 11px; color: #000; font-weight: 400; line-height: 1.35;">
+            <strong style="color: #000; font-weight: 600;">Notes:</strong> ${data.notes}
+        </div>
+    ` : '';
+
+    const logoHtml = (brand && brand.logo) ? `
+        <div style="text-align: center; margin-bottom: 4px;">
+            <img src="${brand.logo}" alt="Logo" style="max-height: 80px; max-width: 200px; height: auto; width: auto; object-fit: contain; margin: 0 auto; display: inline-block;">
+        </div>
+    ` : '';
+
+    const slogan = brand.slogan ? `<div style="font-size: 11px; text-transform: uppercase; color: #000; font-weight: 400; margin-top: 2px;">${brand.slogan}</div>` : '';
+    const address = brand.address ? `<div style="font-size: 11px; color: #000; font-weight: 400; margin-top: 2px; line-height: 1.3;">${brand.address}</div>` : '';
+    const phone = (brand.phone1 || brand.phone2) ? `<div style="font-size: 11.5px; font-weight: 400; color: #000; margin-top: 2px;">Tel: ${brand.phone1 || ''} ${brand.phone2 ? '/ ' .concat(brand.phone2) : ''}</div>` : '';
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>&nbsp;</title>
+    <style>
+        @page {
+            margin: 0;
+            size: auto;
+        }
+        @media print {
+            html, body {
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #fff !important;
+            }
+            .receipt-wrapper {
+                width: 100% !important;
+                max-width: 100% !important;
+                margin: 0 !important;
+                margin-left: 0 !important;
+                padding: 0 1.5mm !important;
+                box-sizing: border-box !important;
+            }
+        }
+        html, body {
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            background: #fff;
+            color: #000;
+            font-family: Arial, "Segoe UI", Roboto, "Helvetica Neue", Helvetica, sans-serif;
+            font-size: 11.5px;
+            font-weight: 400;
+            line-height: 1.35;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: geometricPrecision;
+            box-sizing: border-box;
+        }
+        .receipt-wrapper {
+            width: 100%;
+            max-width: 100%;
+            margin: 0;
+            margin-left: 0;
+            padding: 0 1.5mm;
+            box-sizing: border-box;
+            font-family: Arial, "Segoe UI", Roboto, "Helvetica Neue", Helvetica, sans-serif;
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="receipt-wrapper">
+        <div style="text-align: center; margin-bottom: 5px;">
+            ${logoHtml}
+            <div style="font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; color: #000; line-height: 1.2;">${brand.name || 'JUGNU SALOON'}</div>
+            ${slogan}
+            ${address}
+            ${phone}
+        </div>
+
+        <div style="border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 2.5px 0; margin: 4px 0; text-align: center; font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.3px; color: #000;">
+            SERVICE BILL / CASH RECEIPT
+        </div>
+
+        <div style="font-size: 11.5px; margin-bottom: 5px; color: #000;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                <span style="font-weight: 400; color: #000;">Invoice #:</span>
+                <span style="font-weight: 500; color: #000;">${data.billNo || '—'}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                <span style="font-weight: 400; color: #000;">Date & Time:</span>
+                <span style="font-weight: 400; color: #000;">${data.billDate || ''} ${data.billTime || ''}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                <span style="font-weight: 400; color: #000;">Channel:</span>
+                <span style="font-weight: 500; text-transform: uppercase; color: #000;">${data.orderType || 'On Site'}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                <span style="font-weight: 400; color: #000;">Client:</span>
+                <span style="font-weight: 500; color: #000;">${data.customerName || 'Walk-in Client'}</span>
+            </div>
+            ${data.customerPhone ? `
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                <span style="font-weight: 400; color: #000;">Phone:</span>
+                <span style="font-weight: 400; color: #000;">${data.customerPhone}</span>
+            </div>` : ''}
+        </div>
+
+        <div style="border-top: 1px solid #000; padding-top: 3px; margin-bottom: 5px;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 11.5px;">
+                <thead>
+                    <tr style="border-bottom: 1px solid #000;">
+                        <th style="padding: 2.5px 0; text-align: left; font-size: 11px; font-weight: 600; color: #000;">ITEM / SERVICE</th>
+                        <th style="padding: 2.5px 0; text-align: center; width: 28px; font-size: 11px; font-weight: 600; color: #000;">QTY</th>
+                        <th style="padding: 2.5px 0; text-align: right; width: 48px; font-size: 11px; font-weight: 600; color: #000;">PRICE</th>
+                        <th style="padding: 2.5px 0; text-align: right; width: 44px; font-size: 11px; font-weight: 600; color: #000;">DISC</th>
+                        <th style="padding: 2.5px 0; text-align: right; width: 52px; font-size: 11px; font-weight: 600; color: #000;">TOTAL</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${itemsRows}
+                </tbody>
+            </table>
+        </div>
+
+        <div style="border-top: 1px solid #000; padding-top: 3px; font-size: 11.5px;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                <span style="font-weight: 400; color: #000;">Subtotal (Gross):</span>
+                <span style="font-weight: 500; color: #000;">PKR ${Number(data.subtotal || 0).toLocaleString()}</span>
+            </div>
+            ${discountRows}
+            ${extraRow}
+
+            <div style="display: flex; justify-content: space-between; font-size: 13.5px; font-weight: 700; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 3.5px 0; margin: 5px 0; color: #000;">
+                <span>TOTAL NET BILL:</span>
+                <span>PKR ${Number(data.netAmount || 0).toLocaleString()}</span>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                <span style="font-weight: 400; color: #000;">Payment Mode:</span>
+                <span style="font-weight: 500; text-transform: uppercase; color: #000;">${data.paymentMode || 'Cash'}</span>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px; font-weight: 400; color: #000;">
+                <span>Paid Amount:</span>
+                <span style="font-weight: 500;">PKR ${Number(data.paidAmount || 0).toLocaleString()}</span>
+            </div>
+
+            ${balanceRow}
+            ${changeRow}
+        </div>
+
+        ${notesSection}
+
+        <div style="border-top: 1px solid #000; margin-top: 6px; padding-top: 5px; text-align: center; font-size: 11px; color: #000;">
+            <div style="font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; font-size: 11.5px;">*** THANK YOU FOR VISITING ***</div>
+            <div style="font-size: 11px; color: #000; font-weight: 400; margin-top: 3px; white-space: pre-line; line-height: 1.35;">${brand.appointmentReceiptNote ? brand.appointmentReceiptNote : 'Please inspect your receipt before leaving.'}</div>
+            <div style="font-size: 11px; color: #000; font-weight: 400; margin-top: 4px;">Generated By: <strong style="color: #000; font-weight: 600;">${data.generatedBy || '{{ addslashes(auth()->user()->name ?? 'Staff') }}'}</strong></div>
+            <div style="font-size: 10px; color: #000; font-weight: 400; margin-top: 3px;">Powered by RAPIDTECHPRO &bull; ${new Date().getFullYear()}</div>
+        </div>
+    </div>
+</body>
+</html>`;
+};
+
+window.uploadAppointmentReceiptSlip = async function(app) {
+    const fileInput = app.$refs.slipFileInput;
+    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+        alert('Please select an image file (PNG, JPG, WEBP) to upload.');
+        return;
+    }
+    const file = fileInput.files[0];
+    const formData = new FormData();
+    formData.append('receipt_image', file);
+    const csrfTokenMeta = document.querySelector('meta[name="csrf-token"]');
+    if (csrfTokenMeta) {
+        formData.append('_token', csrfTokenMeta.getAttribute('content'));
+    }
+
+    app.proofModalData.uploading = true;
+    app.proofModalData.errorMessage = '';
+
+    try {
+        const res = await fetch('/manager/appointments/' + app.proofModalData.appointmentId + '/upload-receipt', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'application/json'
+            }
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            app.proofModalData.url = data.receipt_url + '?t=' + Date.now();
+            app.proofModalData.imgError = false;
+            app.proofModalData.imgLoading = true;
+            app.proofModalData.uploadSuccess = true;
+            app.proofModalData.showReplaceForm = false;
+            fileInput.value = '';
+            setTimeout(() => {
+                app.proofModalData.uploadSuccess = false;
+            }, 4000);
+        } else {
+            app.proofModalData.errorMessage = data.message || 'Failed to upload receipt slip. Please try again.';
+        }
+    } catch (err) {
+        app.proofModalData.errorMessage = 'Upload error: ' + err.message;
+    } finally {
+        app.proofModalData.uploading = false;
+    }
+};
+</script>
 @endsection

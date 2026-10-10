@@ -16,8 +16,10 @@ class AccountLedgerController extends Controller
     {
         $accountId = $request->input('account_id');
         $type = $request->input('type');
+        $startDate = $request->input('start_date');
+        $endDate = $request->input('end_date');
 
-        $query = AccountLedger::with('account');
+        $query = AccountLedger::with(['account.category']);
 
         if ($accountId) {
             $query->where('account_id', $accountId);
@@ -27,11 +29,32 @@ class AccountLedgerController extends Controller
             $query->where('type', $type);
         }
 
-        $ledgers = $query->orderBy('id', 'desc')->paginate(15)->withQueryString();
-        $accounts = Account::orderBy('name')->get();
+        if ($startDate) {
+            $query->whereDate('date', '>=', $startDate);
+        }
 
-        $selectedAccount = $accountId ? Account::find($accountId) : null;
+        if ($endDate) {
+            $query->whereDate('date', '<=', $endDate);
+        }
 
-        return view('manager.ledger.index', compact('ledgers', 'accounts', 'accountId', 'type', 'selectedAccount'));
+        $totalDebit = (clone $query)->sum('debit');
+        $totalCredit = (clone $query)->sum('credit');
+
+        $ledgers = $query->orderBy('date', 'desc')->orderBy('id', 'desc')->paginate(20)->withQueryString();
+        $accounts = Account::with('category')->orderBy('name')->get();
+
+        $selectedAccount = $accountId ? Account::with('category')->find($accountId) : null;
+
+        return view('manager.ledger.index', compact(
+            'ledgers', 
+            'accounts', 
+            'accountId', 
+            'type', 
+            'startDate', 
+            'endDate', 
+            'selectedAccount',
+            'totalDebit',
+            'totalCredit'
+        ));
     }
 }

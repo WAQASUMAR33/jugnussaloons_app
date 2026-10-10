@@ -7,6 +7,7 @@ use App\Models\Appointment;
 use App\Models\AppointmentService;
 use App\Models\Sale;
 use App\Models\SaloonService;
+use App\Services\CelebrationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -20,13 +21,24 @@ class DashboardController extends Controller
         $today = now()->format('Y-m-d');
         $yesterday = now()->subDay()->format('Y-m-d');
 
-        // 1. Revenue Metrics (Appointments paid + Product Sales)
-        $todayAppointmentRev = (float) Appointment::whereDate('appointment_date', $today)->sum('paid_amount');
-        $todaySaleRev = (float) Sale::whereDate('sale_date', $today)->sum('total_amount');
-        $todayRevenue = $todayAppointmentRev + $todaySaleRev;
+        // 1. Revenue Metrics (Appointments paid + Product Sales) - Batched in 2 queries
+        $appointmentRevs = Appointment::whereIn('appointment_date', [$yesterday, $today])
+            ->selectRaw('appointment_date, SUM(paid_amount) as total')
+            ->groupBy('appointment_date')
+            ->pluck('total', 'appointment_date');
 
-        $yesterdayAppointmentRev = (float) Appointment::whereDate('appointment_date', $yesterday)->sum('paid_amount');
-        $yesterdaySaleRev = (float) Sale::whereDate('sale_date', $yesterday)->sum('total_amount');
+        $todayAppointmentRev = (float) ($appointmentRevs[$today] ?? 0);
+        $yesterdayAppointmentRev = (float) ($appointmentRevs[$yesterday] ?? 0);
+
+        $saleRevs = Sale::whereIn('sale_date', [$yesterday, $today])
+            ->selectRaw('sale_date, SUM(total_amount) as total')
+            ->groupBy('sale_date')
+            ->pluck('total', 'sale_date');
+
+        $todaySaleRev = (float) ($saleRevs[$today] ?? 0);
+        $yesterdaySaleRev = (float) ($saleRevs[$yesterday] ?? 0);
+
+        $todayRevenue = $todayAppointmentRev + $todaySaleRev;
         $yesterdayRevenue = $yesterdayAppointmentRev + $yesterdaySaleRev;
 
         $revenueGrowth = 0;
@@ -36,10 +48,17 @@ class DashboardController extends Controller
             $revenueGrowth = 100;
         }
 
-        // 2. Appointment Metrics
-        $todayAppointmentsCount = Appointment::whereDate('appointment_date', $today)->count();
-        $pendingAppointmentsCount = Appointment::where('status', 'pending')->count();
-        $totalAppointmentsCount = Appointment::count();
+        // 2. Appointment Metrics - Batched in 1 single query
+        $appointmentStats = Appointment::selectRaw(
+            "COUNT(*) as total,
+             SUM(CASE WHEN appointment_date = ? THEN 1 ELSE 0 END) as today_cnt,
+             SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_cnt",
+            [$today]
+        )->first();
+
+        $todayAppointmentsCount = (int) ($appointmentStats->today_cnt ?? 0);
+        $pendingAppointmentsCount = (int) ($appointmentStats->pending_cnt ?? 0);
+        $totalAppointmentsCount = (int) ($appointmentStats->total ?? 0);
 
         // 3. Customer Account Metrics
         $customersQuery = Account::whereHas('category', function ($q) {
@@ -49,14 +68,15 @@ class DashboardController extends Controller
               ->orWhere('title', 'like', '%Member%');
         });
 
-        $totalCustomersCount = $customersQuery->exists()
-            ? $customersQuery->count()
-            : Account::whereDoesntHave('category', function ($q) {
+        $totalCustomersCount = $customersQuery->count();
+        if ($totalCustomersCount === 0) {
+            $totalCustomersCount = Account::whereDoesntHave('category', function ($q) {
                 $q->where('title', 'like', '%Supplier%')
                   ->orWhere('title', 'like', '%Vendor%')
                   ->orWhere('title', 'like', '%Employee%')
                   ->orWhere('title', 'like', '%Staff%');
             })->count();
+        }
 
         $newCustomersThisWeekCount = Account::where('created_at', '>=', now()->startOfWeek())->count();
 
@@ -67,12 +87,13 @@ class DashboardController extends Controller
               ->orWhere('title', 'like', '%Stylist%');
         });
 
-        $activeStaffCount = $staffQuery->exists()
-            ? $staffQuery->count()
-            : Account::whereHas('category', function ($q) {
+        $activeStaffCount = $staffQuery->count();
+        if ($activeStaffCount === 0) {
+            $activeStaffCount = Account::whereHas('category', function ($q) {
                 $q->where('title', 'not like', '%Supplier%')
                   ->where('title', 'not like', '%Vendor%');
             })->count();
+        }
 
         // 5. Today's Appointments (or Fallback to Recent Appointments if Today is empty)
         $todayAppointments = Appointment::with(['customer', 'employee', 'items.service'])
@@ -102,8 +123,12 @@ class DashboardController extends Controller
         $popularServices = collect();
 
         if ($totalBookingsSum > 0) {
+            // Batch-load all needed services in ONE query instead of N+1
+            $serviceIds = $serviceCounts->pluck('saloon_service_id')->all();
+            $serviceMap = SaloonService::whereIn('id', $serviceIds)->get()->keyBy('id');
+
             foreach ($serviceCounts as $sc) {
-                $srv = SaloonService::find($sc->saloon_service_id);
+                $srv = $serviceMap->get($sc->saloon_service_id);
                 if ($srv) {
                     $pct = round(($sc->total_bookings / $totalBookingsSum) * 100);
                     $popularServices->push([
@@ -129,35 +154,25 @@ class DashboardController extends Controller
             }
         }
 
-        // 7. Today's Birthday & Anniversary Celebrations
-        $todayMonth = now()->month;
-        $todayDay = now()->day;
+        // 7. Birthday & Anniversary Celebrations System
+        $celebrations = CelebrationService::getCelebrationsData();
 
-        $todayBirthdays = Account::with('category')
-            ->whereMonth('date_of_birth', $todayMonth)
-            ->whereDay('date_of_birth', $todayDay)
-            ->get();
-
-        $todayAnniversaries = Account::with('category')
-            ->whereMonth('date_of_anniversary', $todayMonth)
-            ->whereDay('date_of_anniversary', $todayDay)
-            ->get();
-
-        return view('dashboard', compact(
-            'todayRevenue',
-            'yesterdayRevenue',
-            'revenueGrowth',
-            'todayAppointmentsCount',
-            'pendingAppointmentsCount',
-            'totalAppointmentsCount',
-            'totalCustomersCount',
-            'newCustomersThisWeekCount',
-            'activeStaffCount',
-            'todayAppointments',
-            'isFallbackSchedule',
-            'popularServices',
-            'todayBirthdays',
-            'todayAnniversaries'
+        return view('dashboard', array_merge(
+            compact(
+                'todayRevenue',
+                'yesterdayRevenue',
+                'revenueGrowth',
+                'todayAppointmentsCount',
+                'pendingAppointmentsCount',
+                'totalAppointmentsCount',
+                'totalCustomersCount',
+                'newCustomersThisWeekCount',
+                'activeStaffCount',
+                'todayAppointments',
+                'isFallbackSchedule',
+                'popularServices'
+            ),
+            $celebrations
         ));
     }
 }
