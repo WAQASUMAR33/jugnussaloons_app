@@ -105,6 +105,7 @@ function appointmentHistory() {
         },
 
         rateModalOpen: false,
+        isSubmitting: false,
         ratingApt: null,
         ratingScore: 5,
         ratingNotes: '',
@@ -114,6 +115,34 @@ function appointmentHistory() {
             this.ratingScore = parseInt(apt.ranking) || 5;
             this.ratingNotes = apt.ranking_notes || '';
             this.rateModalOpen = true;
+        },
+
+        payRemainingModalOpen: false,
+        payRemainingAptId: null,
+        payRemainingBookingNo: '',
+        payRemainingCustomerName: '',
+        payRemainingNetAmount: 0,
+        payRemainingPaidAmount: 0,
+        payRemainingBalanceDue: 0,
+        payRemainingAmount: 0,
+        payRemainingMode: 'Cash',
+        payRemainingBankId: '',
+        payRemainingDate: '{{ now()->toDateString() }}',
+        payRemainingNotes: '',
+
+        openPayRemainingModal(id, bookingNo, customerName, netAmount, paidAmount, balanceDue) {
+            this.payRemainingAptId = id;
+            this.payRemainingBookingNo = bookingNo;
+            this.payRemainingCustomerName = customerName;
+            this.payRemainingNetAmount = netAmount;
+            this.payRemainingPaidAmount = paidAmount;
+            this.payRemainingBalanceDue = balanceDue;
+            this.payRemainingAmount = balanceDue;
+            this.payRemainingMode = 'Cash';
+            this.payRemainingBankId = '';
+            this.payRemainingDate = '{{ now()->toDateString() }}';
+            this.payRemainingNotes = '';
+            this.payRemainingModalOpen = true;
         },
 
         receiptModalOpen: false,
@@ -421,6 +450,7 @@ function appointmentHistory() {
                         <option value="confirmed" {{ $status == 'confirmed' ? 'selected' : '' }}>Confirmed</option>
                         <option value="completed" {{ $status == 'completed' ? 'selected' : '' }}>Completed</option>
                         <option value="cancelled" {{ $status == 'cancelled' ? 'selected' : '' }}>Cancelled</option>
+                        <option value="rejected" {{ $status == 'rejected' ? 'selected' : '' }}>Rejected</option>
                     </select>
                 </div>
 
@@ -551,11 +581,18 @@ function appointmentHistory() {
                             <td class="py-4 px-4 font-bold text-emerald-600">PKR {{ number_format($apt->paid_amount, 2) }}</td>
                             <td class="py-4 px-4 font-bold">
                                 @if($apt->balance_due > 0)
-                                    <span class="px-2 py-0.5 bg-rose-50 text-rose-700 font-black border border-rose-200">
+                                    <span class="px-2 py-0.5 bg-rose-50 text-rose-700 font-black border border-rose-200 block text-center">
                                         PKR {{ number_format($apt->balance_due, 2) }} Due
                                     </span>
+                                    @if(!in_array($apt->status, ['cancelled', 'rejected']))
+                                        <button type="button" 
+                                                @click="openPayRemainingModal({{ $apt->id }}, '{{ $apt->booking_no }}', '{{ addslashes($apt->customer->name ?? 'Client') }}', {{ (float)$apt->net_amount }}, {{ (float)$apt->paid_amount }}, {{ (float)$apt->balance_due }})"
+                                                class="mt-1 block w-full text-center text-[10px] font-extrabold text-emerald-800 hover:text-white bg-emerald-50 hover:bg-emerald-600 border border-emerald-300 hover:border-emerald-600 px-1.5 py-0.5 transition-all cursor-pointer shadow-2xs">
+                                            + Pay Remaining
+                                        </button>
+                                    @endif
                                 @else
-                                    <span class="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-bold border border-emerald-200">
+                                    <span class="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-bold border border-emerald-200 block text-center">
                                         Cleared (PKR 0.00)
                                     </span>
                                 @endif
@@ -565,7 +602,8 @@ function appointmentHistory() {
                                     {{ $apt->status === 'confirmed' ? 'bg-blue-50 text-blue-700 border border-blue-200' : '' }}
                                     {{ $apt->status === 'completed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : '' }}
                                     {{ $apt->status === 'pending' ? 'bg-amber-50 text-amber-700 border border-amber-200' : '' }}
-                                    {{ $apt->status === 'cancelled' ? 'bg-rose-50 text-rose-700 border border-rose-200' : '' }}">
+                                    {{ $apt->status === 'cancelled' ? 'bg-rose-50 text-rose-700 border border-rose-200' : '' }}
+                                    {{ $apt->status === 'rejected' ? 'bg-rose-100 text-rose-800 border border-rose-300' : '' }}">
                                     {{ $apt->status }}
                                 </span>
                             </td>
@@ -612,6 +650,15 @@ function appointmentHistory() {
                             </td>
                             <td class="py-4 px-4 text-right">
                                 <div class="flex items-center justify-end gap-1.5">
+                                    @if($apt->balance_due > 0 && !in_array($apt->status, ['cancelled', 'rejected']))
+                                        <button type="button" 
+                                                @click="openPayRemainingModal({{ $apt->id }}, '{{ $apt->booking_no }}', '{{ addslashes($apt->customer->name ?? 'Client') }}', {{ (float)$apt->net_amount }}, {{ (float)$apt->paid_amount }}, {{ (float)$apt->balance_due }})"
+                                                class="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[11px] rounded-none transition-colors border border-emerald-700 inline-flex items-center gap-1 shadow-xs cursor-pointer"
+                                                title="Pay remaining balance (PKR {{ number_format($apt->balance_due, 2) }})">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                                            <span>Pay Due</span>
+                                        </button>
+                                    @endif
                                     <button type="button" @click="openRateModal(getAppointmentById({{ $apt->id }}))" 
                                             class="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-[11px] rounded-none transition-colors border border-amber-200 inline-flex items-center gap-1"
                                             title="Rank / Rate Assigned Employee">
@@ -630,6 +677,19 @@ function appointmentHistory() {
                                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                                         <span>Edit</span>
                                     </a>
+                                    @if($apt->status === 'pending')
+                                        <form method="POST" action="{{ route('manager.appointments.updateStatus', $apt->id) }}" class="inline" onsubmit="return confirm('Reject booking #{{ $apt->booking_no }}? This will mark it rejected and prevent any funds from being counted in Day Closing.');">
+                                            @csrf
+                                            @method('PATCH')
+                                            <input type="hidden" name="status" value="rejected">
+                                            <button type="submit" 
+                                                    class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-900 font-bold text-[11px] rounded-none transition-colors border border-rose-200 inline-flex items-center gap-1 cursor-pointer"
+                                                    title="Reject booking">
+                                                <svg class="w-3.5 h-3.5 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                                <span>Reject</span>
+                                            </button>
+                                        </form>
+                                    @endif
                                 </div>
                             </td>
                         </tr>
@@ -708,7 +768,7 @@ function appointmentHistory() {
                 </div>
 
                 <template x-if="ratingApt">
-                    <form method="POST" :action="'/manager/appointments/' + ratingApt.id + '/rate'" class="space-y-4">
+                    <form method="POST" :action="'/manager/appointments/' + ratingApt.id + '/rate'" @submit="if(isSubmitting) { $event.preventDefault(); return false; } isSubmitting = true" class="space-y-4">
                         @csrf
                         
                         <!-- Booking Summary Header -->
@@ -772,9 +832,15 @@ function appointmentHistory() {
                                     class="px-4 py-2 bg-slate-100 text-slate-700 font-bold text-xs hover:bg-slate-200">
                                 Cancel
                             </button>
-                            <button type="submit" 
-                                    class="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-black text-xs shadow-xs transition-colors">
-                                Save Staff Ranking
+                            <button type="submit" :disabled="isSubmitting"
+                                    class="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-black text-xs shadow-xs transition-colors flex items-center gap-1.5 disabled:opacity-70 disabled:cursor-not-allowed">
+                                <template x-if="isSubmitting">
+                                    <svg class="animate-spin w-3.5 h-3.5 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                    </svg>
+                                </template>
+                                <span x-text="isSubmitting ? 'Saving...' : 'Save Staff Ranking'"></span>
                             </button>
                         </div>
                     </form>
@@ -928,6 +994,130 @@ function appointmentHistory() {
                         </template>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: PAY REMAINING APPOINTMENT BALANCE -->
+    <div x-show="payRemainingModalOpen" class="fixed inset-0 z-50 overflow-y-auto" x-cloak>
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 transition-opacity bg-slate-900/70 backdrop-blur-xs" @click="payRemainingModalOpen = false"></div>
+            <div class="inline-block w-full max-w-lg p-6 my-8 overflow-hidden text-left align-middle transition-all transform bg-white shadow-2xl rounded-none border border-slate-300 space-y-4">
+                
+                <div class="flex items-center justify-between border-b border-slate-200 pb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xl">💳</span>
+                        <div>
+                            <h3 class="text-base font-extrabold text-slate-900 heading-font">Pay Remaining Balance</h3>
+                            <p class="text-xs text-slate-500 font-medium">Record payment received for booking <span class="font-bold text-indigo-600" x-text="'#' + payRemainingBookingNo"></span></p>
+                        </div>
+                    </div>
+                    <button type="button" @click="payRemainingModalOpen = false" class="text-slate-400 hover:text-slate-600 cursor-pointer">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </div>
+
+                <!-- Booking Balance Summary Cards -->
+                <div class="p-4 bg-slate-50 border border-slate-200 grid grid-cols-3 gap-3 text-center">
+                    <div class="bg-white p-2.5 border border-slate-200">
+                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Total Bill</span>
+                        <span class="text-xs font-black text-slate-900" x-text="'PKR ' + Number(payRemainingNetAmount).toLocaleString('en-US', {minimumFractionDigits: 2})"></span>
+                    </div>
+                    <div class="bg-white p-2.5 border border-slate-200">
+                        <span class="text-[10px] uppercase font-bold text-emerald-600 block tracking-wider">Already Paid</span>
+                        <span class="text-xs font-black text-emerald-700" x-text="'PKR ' + Number(payRemainingPaidAmount).toLocaleString('en-US', {minimumFractionDigits: 2})"></span>
+                    </div>
+                    <div class="bg-rose-50 p-2.5 border border-rose-200">
+                        <span class="text-[10px] uppercase font-bold text-rose-600 block tracking-wider">Balance Due</span>
+                        <span class="text-xs font-black text-rose-700" x-text="'PKR ' + Number(payRemainingBalanceDue).toLocaleString('en-US', {minimumFractionDigits: 2})"></span>
+                    </div>
+                </div>
+
+                <div class="text-xs text-slate-600 font-medium flex items-center gap-1.5 px-1">
+                    <span class="font-bold text-slate-500">Customer:</span>
+                    <span class="font-bold text-slate-900" x-text="payRemainingCustomerName"></span>
+                </div>
+
+                <!-- Payment Form -->
+                <form method="POST" :action="'/manager/appointments/' + payRemainingAptId + '/pay-remaining'" class="space-y-4">
+                    @csrf
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <!-- Payment Amount -->
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                Receiving Amount (PKR) <span class="text-rose-600">*</span>
+                            </label>
+                            <input type="number" step="0.01" min="0.01" :max="payRemainingBalanceDue" name="payment_amount" x-model="payRemainingAmount" required
+                                   class="w-full px-3 py-2 bg-white border border-slate-300 font-black text-sm text-slate-900 focus:ring-2 focus:ring-emerald-500 rounded-none">
+                            <span class="text-[10px] text-slate-400 font-semibold mt-0.5 block">Can be full balance or partial installment</span>
+                        </div>
+
+                        <!-- Payment Date -->
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                Payment Date <span class="text-rose-600">*</span>
+                            </label>
+                            <input type="date" name="payment_date" x-model="payRemainingDate" required
+                                   class="w-full px-3 py-2 bg-white border border-slate-300 font-bold text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500 rounded-none">
+                            <span class="text-[10px] text-emerald-600 font-semibold mt-0.5 block">Exact date money entered salon drawer / bank</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <!-- Payment Mode -->
+                        <div>
+                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                Payment Method <span class="text-rose-600">*</span>
+                            </label>
+                            <select name="payment_mode" x-model="payRemainingMode" required
+                                    class="w-full px-3 py-2 bg-white border border-slate-300 font-bold text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500 rounded-none">
+                                <option value="Cash">💵 Cash</option>
+                                <option value="Bank">🏦 Bank Transfer</option>
+                                <option value="Card">💳 Credit / Debit Card</option>
+                                <option value="Other">✨ Other</option>
+                            </select>
+                        </div>
+
+                        <!-- Bank Account Picker (conditional) -->
+                        <div x-show="['Bank', 'Card'].includes(payRemainingMode)" x-cloak>
+                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                                Deposited Bank Account
+                            </label>
+                            <select name="bank_account_id" x-model="payRemainingBankId"
+                                    class="w-full px-3 py-2 bg-white border border-slate-300 font-bold text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500 rounded-none">
+                                <option value="">-- Select Bank Account --</option>
+                                @if(isset($bankAccounts))
+                                    @foreach($bankAccounts as $bank)
+                                        <option value="{{ $bank->bankid }}">
+                                            {{ $bank->bank_name }} - {{ $bank->account_title }} ({{ $bank->account_no }})
+                                        </option>
+                                    @endforeach
+                                @endif
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Notes -->
+                    <div>
+                        <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Notes / Remarks</label>
+                        <input type="text" name="notes" x-model="payRemainingNotes" placeholder="e.g. Paid remaining balance at desk"
+                               class="w-full px-3 py-2 bg-white border border-slate-300 text-xs text-slate-800 focus:ring-2 focus:ring-emerald-500 rounded-none">
+                    </div>
+
+                    <!-- Modal Action Buttons -->
+                    <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
+                        <button type="button" @click="payRemainingModalOpen = false"
+                                class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-none transition-colors cursor-pointer">
+                            Cancel
+                        </button>
+                        <button type="submit"
+                                class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-none transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                            <span>Record Payment</span>
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>

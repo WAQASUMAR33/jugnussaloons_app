@@ -8,6 +8,7 @@
     editModalOpen: false,
     resetPasswordModalOpen: false,
     transactionModalOpen: false,
+    isSubmitting: false,
     transactionType: 'receiving',
     transactionAmount: '',
     categories: {{ json_encode($categories->map(fn($c) => ['id' => (int)$c->id, 'title' => $c->title])) }},
@@ -354,7 +355,7 @@
                 </button>
             </div>
 
-            <form method="POST" action="{{ route('manager.accounts.store') }}" class="space-y-4">
+            <form method="POST" action="{{ route('manager.accounts.store') }}" @submit="if(isSubmitting) { $event.preventDefault(); return false; } isSubmitting = true" class="space-y-4">
                 @csrf
                 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -498,8 +499,14 @@
                     <button type="button" @click="createModalOpen = false" class="px-4 py-2.5 text-slate-600 font-bold text-xs">
                         Cancel
                     </button>
-                    <button type="submit" class="px-6 py-2.5 bg-indigo-600 text-white font-bold text-xs shadow-md">
-                        Save Account
+                    <button type="submit" :disabled="isSubmitting" class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 disabled:opacity-70 disabled:cursor-not-allowed">
+                        <template x-if="isSubmitting">
+                            <svg class="animate-spin w-3.5 h-3.5 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                            </svg>
+                        </template>
+                        <span x-text="isSubmitting ? 'Saving...' : 'Save Account'"></span>
                     </button>
                 </div>
             </form>
@@ -762,7 +769,7 @@
                 </div>
             </div>
 
-            <form :action="'{{ url('manager/accounts') }}/' + activeAccount.id + '/transaction'" method="POST" class="space-y-4">
+            <form :action="'{{ url('manager/accounts') }}/' + activeAccount.id + '/transaction'" method="POST" @submit="if(isSubmitting) { $event.preventDefault(); return false; } isSubmitting = true" class="space-y-4">
                 @csrf
                 <input type="hidden" id="transaction_type_input" name="transaction_type" :value="transactionType">
 
@@ -824,10 +831,16 @@
                     <button type="button" @click="transactionModalOpen = false" class="px-4 py-2.5 text-slate-600 font-bold text-xs">
                         Cancel
                     </button>
-                    <button type="submit" 
+                    <button type="submit" :disabled="isSubmitting"
                             :class="transactionType === 'receiving' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-purple-600 hover:bg-purple-700'"
-                            class="px-6 py-2.5 text-white font-bold text-xs shadow-md transition-all">
-                        <span x-text="transactionType === 'receiving' ? 'Record Receiving & Generate Ledger' : 'Record Payment & Generate Ledger'"></span>
+                            class="px-6 py-2.5 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 disabled:opacity-70 disabled:cursor-not-allowed">
+                        <template x-if="isSubmitting">
+                            <svg class="animate-spin w-3.5 h-3.5 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                            </svg>
+                        </template>
+                        <span x-text="isSubmitting ? 'Recording Transaction...' : (transactionType === 'receiving' ? 'Record Receiving & Generate Ledger' : 'Record Payment & Generate Ledger')"></span>
                     </button>
                 </div>
             </form>

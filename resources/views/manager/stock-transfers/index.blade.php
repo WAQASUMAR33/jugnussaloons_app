@@ -5,6 +5,7 @@
 @section('content')
 <div x-data="{ 
     createModalOpen: false,
+    isSubmitting: false,
     stores: {{ json_encode($stores) }},
     products: {{ json_encode($products) }},
     sourceStoreId: '{{ $stores->first()->id ?? '' }}',
@@ -216,7 +217,7 @@
                     <button type="button" @click="createModalOpen = false" class="text-slate-400 hover:text-slate-600">&times;</button>
                 </div>
 
-                <form action="{{ route('manager.stock-transfers.store') }}" method="POST" class="space-y-4">
+                <form action="{{ route('manager.stock-transfers.store') }}" method="POST" @submit="if(isSubmitting) { $event.preventDefault(); return false; } isSubmitting = true" class="space-y-4">
                     @csrf
 
                     <!-- Source & Destination Stores -->
@@ -286,9 +287,15 @@
                     <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
                         <button type="button" @click="createModalOpen = false" class="px-4 py-2 bg-slate-100 text-slate-700 text-xs font-bold">Cancel</button>
                         <button type="submit" 
-                                :disabled="availableSourceStock <= 0 || !destStoreId || destStoreId == sourceStoreId"
-                                class="px-5 py-2 bg-blue-600 text-white text-xs font-black hover:bg-blue-700 disabled:opacity-50">
-                            Confirm & Execute Transfer
+                                :disabled="isSubmitting || availableSourceStock <= 0 || !destStoreId || destStoreId == sourceStoreId"
+                                class="px-5 py-2 bg-blue-600 text-white text-xs font-black hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer">
+                            <template x-if="isSubmitting">
+                                <svg class="animate-spin w-3.5 h-3.5 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                </svg>
+                            </template>
+                            <span x-text="isSubmitting ? 'Transferring...' : 'Confirm & Execute Transfer'"></span>
                         </button>
                     </div>
                 </form>

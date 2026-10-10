@@ -102,6 +102,7 @@ Route::middleware(['auth', 'role:manager,admin'])->prefix('manager')->name('mana
         Route::get('appointments/{appointment}/edit', [AppointmentController::class, 'edit'])->name('appointments.edit');
         Route::resource('appointments', AppointmentController::class)->only(['index', 'store', 'update']);
         Route::patch('appointments/{appointment}/status', [AppointmentController::class, 'updateStatus'])->name('appointments.updateStatus');
+        Route::post('appointments/{appointment}/pay-remaining', [AppointmentController::class, 'payRemaining'])->name('appointments.payRemaining');
         Route::post('appointments/{appointment}/rate', [AppointmentController::class, 'rateEmployee'])->name('appointments.rate');
         Route::post('appointments/{appointment}/upload-receipt', [AppointmentController::class, 'uploadReceipt'])->name('appointments.upload-receipt');
     });

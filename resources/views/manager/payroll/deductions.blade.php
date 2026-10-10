@@ -5,6 +5,7 @@
 @section('content')
 <div x-data="{ 
     deductionModalOpen: false,
+    isSubmitting: false,
     deductEmpId: '',
     deductAmount: '',
     deductReason: '',
@@ -326,7 +327,7 @@
                 </button>
             </div>
 
-            <form method="POST" action="{{ route('manager.payroll.deductions.store') }}" class="space-y-4 text-xs font-bold text-slate-700">
+            <form method="POST" action="{{ route('manager.payroll.deductions.store') }}" @submit="if(isSubmitting) { $event.preventDefault(); return false; } isSubmitting = true" class="space-y-4 text-xs font-bold text-slate-700">
                 @csrf
                 
                 <div class="space-y-1">
@@ -387,8 +388,14 @@
                     <button type="button" @click="deductionModalOpen = false" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs border border-slate-200 rounded-none">
                         Cancel
                     </button>
-                    <button type="submit" class="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs shadow-sm rounded-none">
-                        Save Deduction Entry
+                    <button type="submit" :disabled="isSubmitting" class="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs shadow-sm rounded-none flex items-center gap-1.5 disabled:opacity-70 disabled:cursor-not-allowed">
+                        <template x-if="isSubmitting">
+                            <svg class="animate-spin w-3.5 h-3.5 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                            </svg>
+                        </template>
+                        <span x-text="isSubmitting ? 'Saving...' : 'Save Deduction Entry'"></span>
                     </button>
                 </div>
             </form>

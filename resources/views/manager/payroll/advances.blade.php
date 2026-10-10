@@ -5,6 +5,7 @@
 @section('content')
 <div x-data="{ 
     advanceModalOpen: false,
+    isSubmitting: false,
     advEmpId: '',
     advAmount: '',
     advDate: '{{ date('Y-m-d') }}',
@@ -249,7 +250,7 @@
                 </button>
             </div>
 
-            <form method="POST" action="{{ route('manager.payroll.advances.store') }}" class="space-y-4 text-xs font-bold text-slate-700">
+            <form method="POST" action="{{ route('manager.payroll.advances.store') }}" @submit="if(isSubmitting) { $event.preventDefault(); return false; } isSubmitting = true" class="space-y-4 text-xs font-bold text-slate-700">
                 @csrf
                 <div>
                     <label class="block text-slate-600 font-bold uppercase text-[11px] mb-1">Select Employee *</label>
@@ -355,8 +356,14 @@
                     <button type="button" @click="advanceModalOpen = false" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs border border-slate-200 rounded-none cursor-pointer">
                         Cancel
                     </button>
-                    <button type="submit" class="px-6 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-sm rounded-none cursor-pointer">
-                        Confirm & Issue Advance
+                    <button type="submit" :disabled="isSubmitting" class="px-6 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-sm rounded-none cursor-pointer flex items-center gap-1.5 disabled:opacity-70 disabled:cursor-not-allowed">
+                        <template x-if="isSubmitting">
+                            <svg class="animate-spin w-3.5 h-3.5 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                            </svg>
+                        </template>
+                        <span x-text="isSubmitting ? 'Issuing Advance...' : 'Confirm & Issue Advance'"></span>
                     </button>
                 </div>
             </form>

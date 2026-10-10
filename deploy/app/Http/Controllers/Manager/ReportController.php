@@ -20,6 +20,7 @@ use App\Models\Payroll;
 use App\Models\SalaryAdvance;
 use App\Models\DayClosing;
 use App\Models\BankAccount;
+use App\Models\AppointmentPayment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -189,8 +190,19 @@ class ReportController extends Controller
         $employeeId = $request->input('employee_id');
         $reportType = $request->input('report_type', 'datewise');
 
-        $query = Appointment::with(['customer', 'employee', 'items.service.category'])
-            ->whereBetween('appointment_date', [$startDate, $endDate]);
+        $query = Appointment::with([
+            'customer',
+            'employee',
+            'items' => function ($q) use ($serviceCategoryId) {
+                $q->with('service.category');
+                if ($serviceCategoryId) {
+                    $q->whereHas('service', function ($sq) use ($serviceCategoryId) {
+                        $sq->where('service_category_id', $serviceCategoryId);
+                    });
+                }
+            }
+        ])
+        ->whereBetween('appointment_date', [$startDate, $endDate]);
 
         if ($serviceCategoryId) {
             $query->whereHas('items.service', function ($q) use ($serviceCategoryId) {
@@ -204,43 +216,92 @@ class ReportController extends Controller
 
         $appointments = (clone $query)->orderBy('appointment_date', 'desc')->orderBy('id', 'desc')->paginate(15)->withQueryString();
 
-        // Summary Cards
-        $totalAppointmentsCount = (clone $query)->count();
-        $totalGrossRevenue = (clone $query)->sum('total_amount');
-        $totalDiscount = (clone $query)->sum('discount');
-        $totalNetRevenue = (clone $query)->sum('net_amount');
-        $totalCommission = (clone $query)->sum('total_commission');
+        // Calculate category-specific net bill and commission for each appointment row
+        $appointments->getCollection()->transform(function ($apt) use ($serviceCategoryId) {
+            if ($serviceCategoryId) {
+                $catGross = (float) $apt->items->sum('discounted_price');
+                $ratio = (float) $apt->total_amount > 0 ? ((float) $apt->net_amount / (float) $apt->total_amount) : 1;
+                $apt->display_net_amount = round($catGross * $ratio, 2);
+                $apt->display_commission = (float) $apt->items->sum('commission');
+            } else {
+                $apt->display_net_amount = (float) $apt->net_amount;
+                $apt->display_commission = (float) $apt->total_commission;
+            }
+            return $apt;
+        });
+
+        // Summary Cards & Totals
+        if ($serviceCategoryId) {
+            $catSummary = DB::table('appointment_services')
+                ->join('appointments', 'appointment_services.appointment_id', '=', 'appointments.id')
+                ->join('services', 'appointment_services.saloon_service_id', '=', 'services.id')
+                ->whereBetween('appointments.appointment_date', [$startDate, $endDate])
+                ->where('services.service_category_id', $serviceCategoryId)
+                ->when($employeeId, function ($q) use ($employeeId) {
+                    $q->where('appointments.employee_id', $employeeId);
+                })
+                ->selectRaw('
+                    SUM(appointment_services.discounted_price) as gross_revenue,
+                    SUM(appointment_services.discounted_price * (CASE WHEN appointments.total_amount > 0 THEN (appointments.net_amount / appointments.total_amount) ELSE 1 END)) as net_revenue,
+                    SUM(appointment_services.commission) as commission
+                ')
+                ->first();
+
+            $totalAppointmentsCount = (clone $query)->count();
+            $totalGrossRevenue = (float) ($catSummary->gross_revenue ?? 0);
+            $totalNetRevenue = (float) ($catSummary->net_revenue ?? 0);
+            $totalDiscount = max(0, round($totalGrossRevenue - $totalNetRevenue, 2));
+            $totalCommission = (float) ($catSummary->commission ?? 0);
+        } else {
+            $totalAppointmentsCount = (clone $query)->count();
+            $totalGrossRevenue = (float) (clone $query)->sum('total_amount');
+            $totalDiscount = (float) (clone $query)->sum('discount');
+            $totalNetRevenue = (float) (clone $query)->sum('net_amount');
+            $totalCommission = (float) (clone $query)->sum('total_commission');
+        }
 
         // Date-wise Report Breakdown (Filtered by date, stylist, and service category)
-        $datewiseQuery = DB::table('appointments')
-            ->whereBetween('appointments.appointment_date', [$startDate, $endDate]);
-
-        if ($employeeId) {
-            $datewiseQuery->where('appointments.employee_id', $employeeId);
-        }
-
         if ($serviceCategoryId) {
-            $datewiseQuery->whereExists(function ($sub) use ($serviceCategoryId) {
-                $sub->select(DB::raw(1))
-                    ->from('appointment_services')
-                    ->join('services', 'appointment_services.saloon_service_id', '=', 'services.id')
-                    ->whereColumn('appointment_services.appointment_id', 'appointments.id')
-                    ->where('services.service_category_id', $serviceCategoryId);
-            });
-        }
+            $datewiseBreakdown = DB::table('appointment_services')
+                ->join('appointments', 'appointment_services.appointment_id', '=', 'appointments.id')
+                ->join('services', 'appointment_services.saloon_service_id', '=', 'services.id')
+                ->whereBetween('appointments.appointment_date', [$startDate, $endDate])
+                ->where('services.service_category_id', $serviceCategoryId)
+                ->when($employeeId, function ($q) use ($employeeId) {
+                    $q->where('appointments.employee_id', $employeeId);
+                })
+                ->select(
+                    'appointments.appointment_date',
+                    DB::raw('COUNT(DISTINCT appointments.id) as total_count'),
+                    DB::raw('SUM(appointment_services.discounted_price) as gross_amount'),
+                    DB::raw('SUM(appointment_services.discounted_price - (appointment_services.discounted_price * (CASE WHEN appointments.total_amount > 0 THEN (appointments.net_amount / appointments.total_amount) ELSE 1 END))) as discount_amount'),
+                    DB::raw('SUM(appointment_services.discounted_price * (CASE WHEN appointments.total_amount > 0 THEN (appointments.net_amount / appointments.total_amount) ELSE 1 END)) as net_amount'),
+                    DB::raw('SUM(appointment_services.commission) as total_commission')
+                )
+                ->groupBy('appointments.appointment_date')
+                ->orderBy('appointments.appointment_date', 'desc')
+                ->get();
+        } else {
+            $datewiseQuery = DB::table('appointments')
+                ->whereBetween('appointments.appointment_date', [$startDate, $endDate]);
 
-        $datewiseBreakdown = $datewiseQuery
-            ->select(
-                'appointments.appointment_date',
-                DB::raw('COUNT(appointments.id) as total_count'),
-                DB::raw('SUM(appointments.total_amount) as gross_amount'),
-                DB::raw('SUM(appointments.discount) as discount_amount'),
-                DB::raw('SUM(appointments.net_amount) as net_amount'),
-                DB::raw('SUM(appointments.total_commission) as total_commission')
-            )
-            ->groupBy('appointments.appointment_date')
-            ->orderBy('appointments.appointment_date', 'desc')
-            ->get();
+            if ($employeeId) {
+                $datewiseQuery->where('appointments.employee_id', $employeeId);
+            }
+
+            $datewiseBreakdown = $datewiseQuery
+                ->select(
+                    'appointments.appointment_date',
+                    DB::raw('COUNT(appointments.id) as total_count'),
+                    DB::raw('SUM(appointments.total_amount) as gross_amount'),
+                    DB::raw('SUM(appointments.discount) as discount_amount'),
+                    DB::raw('SUM(appointments.net_amount) as net_amount'),
+                    DB::raw('SUM(appointments.total_commission) as total_commission')
+                )
+                ->groupBy('appointments.appointment_date')
+                ->orderBy('appointments.appointment_date', 'desc')
+                ->get();
+        }
 
         // Category-wise Report Breakdown (Filtered by date, stylist, and service category)
         $categorywiseQuery = DB::table('appointment_services')
@@ -491,7 +552,8 @@ class ReportController extends Controller
         // services profit = total services amount - (total expenses + total salaries paid)
         // -------------------------------------------------------------
         $appointmentsQuery = Appointment::with(['customer', 'employee'])
-            ->whereBetween('appointment_date', [$startDate, $endDate]);
+            ->whereBetween('appointment_date', [$startDate, $endDate])
+            ->whereNotIn('status', ['cancelled', 'rejected']);
 
         $totalServicesGrossAmount = (float) (clone $appointmentsQuery)->sum('total_amount');
         $totalServicesDiscount = (float) (clone $appointmentsQuery)->sum('discount');
@@ -593,10 +655,12 @@ class ReportController extends Controller
         // -------------------------------------------------------------
         // 2. DAILY RECEIVINGS ON SELECTED DATE (INFLOWS)
         // -------------------------------------------------------------
-        // Appointments
-        $allAppointments = Appointment::with(['customer', 'employee'])
-            ->where('appointment_date', $date)
-            ->where('paid_amount', '>', 0)
+        // Appointments (Query actual payments received on this calendar date, excluding cancelled/rejected bookings)
+        $allAppointments = AppointmentPayment::with(['appointment.customer', 'appointment.employee', 'bankAccount'])
+            ->where('payment_date', $date)
+            ->whereHas('appointment', function($q) {
+                $q->whereNotIn('status', ['cancelled', 'rejected']);
+            })
             ->get();
 
         $cashAptTotal = 0.0;
@@ -608,9 +672,9 @@ class ReportController extends Controller
                 $cashAptTotal += (float) (($splits['Cash'] ?? 0) + ($splits['Other'] ?? 0));
                 $bankAptTotal += (float) (($splits['Bank'] ?? 0) + ($splits['Card'] ?? 0));
             } elseif (in_array($mode, ['bank', 'card', 'bank transfer', 'online'])) {
-                $bankAptTotal += (float) $a->paid_amount;
+                $bankAptTotal += (float) $a->amount;
             } else {
-                $cashAptTotal += (float) $a->paid_amount;
+                $cashAptTotal += (float) $a->amount;
             }
         }
         $totalAptReceived = $cashAptTotal + $bankAptTotal;
@@ -725,7 +789,96 @@ class ReportController extends Controller
         $dayClosing = DayClosing::with('closedBy')->where('closing_date', $date)->first();
 
         // Bank Accounts list for Bank Breakdown tab
-        $bankAccounts = BankAccount::where('is_active', true)->get();
+        $bankAccounts = BankAccount::where('is_active', true)->orderBy('bank_name')->get();
+
+        // -------------------------------------------------------------
+        // ITEMIZE INFLOWS & OUTFLOWS PER SPECIFIC BANK ACCOUNT
+        // -------------------------------------------------------------
+        $bankBreakdown = [];
+        foreach ($bankAccounts as $ba) {
+            $bankBreakdown[$ba->bankid] = [
+                'bankid' => $ba->bankid,
+                'bank_name' => $ba->bank_name,
+                'account_title' => $ba->account_title,
+                'account_no' => $ba->account_no,
+                'branch_name' => $ba->branch_name,
+                'iban' => $ba->iban,
+                'opening' => 0.0,
+                'received_appointments' => 0.0,
+                'received_sales' => 0.0,
+                'total_received' => 0.0,
+                'paid_advances' => 0.0,
+                'total_paid' => 0.0,
+                'net_flow' => 0.0,
+                'closing_expected' => 0.0,
+                'appointments_count' => 0,
+            ];
+        }
+
+        $unassignedBankReceived = 0.0;
+        $unassignedBankPaid = 0.0;
+        $unassignedAptCount = 0;
+
+        foreach ($allAppointments as $a) {
+            $mode = strtolower(trim($a->payment_mode ?? ''));
+            $aptBankAmt = 0.0;
+            if ($mode === 'split' && !empty($a->split_payments)) {
+                $splits = is_array($a->split_payments) ? $a->split_payments : json_decode($a->split_payments, true);
+                $aptBankAmt = (float) (($splits['Bank'] ?? 0) + ($splits['Card'] ?? 0));
+            } elseif (in_array($mode, ['bank', 'card', 'bank transfer', 'online'])) {
+                $aptBankAmt = (float) $a->amount;
+            }
+
+            if ($aptBankAmt > 0) {
+                if ($a->bank_account_id && isset($bankBreakdown[$a->bank_account_id])) {
+                    $bankBreakdown[$a->bank_account_id]['received_appointments'] += $aptBankAmt;
+                    $bankBreakdown[$a->bank_account_id]['total_received'] += $aptBankAmt;
+                    $bankBreakdown[$a->bank_account_id]['appointments_count']++;
+                } else {
+                    $unassignedBankReceived += $aptBankAmt;
+                    $unassignedAptCount++;
+                }
+            }
+        }
+
+        // Outflows: Advances disbursed through bank
+        foreach ($bankAdvances as $adv) {
+            $advAmt = (float) $adv->amount;
+            if ($advAmt > 0) {
+                if ($adv->bank_account_id && isset($bankBreakdown[$adv->bank_account_id])) {
+                    $bankBreakdown[$adv->bank_account_id]['paid_advances'] += $advAmt;
+                    $bankBreakdown[$adv->bank_account_id]['total_paid'] += $advAmt;
+                } else {
+                    $unassignedBankPaid += $advAmt;
+                }
+            }
+        }
+
+        if ($unassignedBankReceived > 0 || $unassignedBankPaid > 0) {
+            $bankBreakdown['unassigned'] = [
+                'bankid' => 'unassigned',
+                'bank_name' => 'General / Other Digital Transfers',
+                'account_title' => 'Unassigned Bank Channel',
+                'account_no' => 'N/A',
+                'branch_name' => '',
+                'iban' => '',
+                'opening' => 0.0,
+                'received_appointments' => $unassignedBankReceived,
+                'received_sales' => 0.0,
+                'total_received' => $unassignedBankReceived,
+                'paid_advances' => $unassignedBankPaid,
+                'total_paid' => $unassignedBankPaid,
+                'net_flow' => $unassignedBankReceived - $unassignedBankPaid,
+                'closing_expected' => $unassignedBankReceived - $unassignedBankPaid,
+                'appointments_count' => $unassignedAptCount,
+            ];
+        }
+
+        foreach ($bankBreakdown as $bId => &$bInfo) {
+            $bInfo['net_flow'] = $bInfo['total_received'] - $bInfo['total_paid'];
+            $bInfo['closing_expected'] = $bInfo['opening'] + $bInfo['net_flow'];
+        }
+        unset($bInfo);
 
         $appSetting = \App\Models\Setting::first();
 
@@ -749,7 +902,7 @@ class ReportController extends Controller
             'netCashFlow', 'netBankFlow', 'totalNetFlow',
             'closingCashExpected', 'closingBankExpected', 'closingTotalExpected',
             // Saved record & metadata
-            'dayClosing', 'bankAccounts', 'appSetting'
+            'dayClosing', 'bankAccounts', 'bankBreakdown', 'appSetting'
         ));
     }
 

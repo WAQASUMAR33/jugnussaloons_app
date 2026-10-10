@@ -6,6 +6,7 @@
 <div x-data="{ 
     createModalOpen: false,
     editModalOpen: false,
+    isSubmitting: false,
     editExpense: { exp_id: null, exp_title: '', exp_category_id: '', amount: 0, description: '', created_at: '' },
     openEditModal(exp) {
         this.editExpense = {
@@ -359,7 +360,7 @@
                 </button>
             </div>
 
-            <form method="POST" action="{{ route('manager.expenses.store') }}" class="space-y-4">
+            <form method="POST" action="{{ route('manager.expenses.store') }}" @submit="if(isSubmitting) { $event.preventDefault(); return false; } isSubmitting = true" class="space-y-4">
                 @csrf
 
                 <div>
@@ -402,8 +403,14 @@
                     <button type="button" @click="createModalOpen = false" class="px-4 py-2.5 text-slate-600 font-bold text-xs">
                         Cancel
                     </button>
-                    <button type="submit" class="px-6 py-2.5 bg-rose-600 text-white font-bold text-xs shadow-md">
-                        Save Expense
+                    <button type="submit" :disabled="isSubmitting" class="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 disabled:opacity-70 disabled:cursor-not-allowed">
+                        <template x-if="isSubmitting">
+                            <svg class="animate-spin w-3.5 h-3.5 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                            </svg>
+                        </template>
+                        <span x-text="isSubmitting ? 'Saving Expense...' : 'Save Expense'"></span>
                     </button>
                 </div>
             </form>
@@ -425,7 +432,7 @@
                 </button>
             </div>
 
-            <form :action="'{{ url('manager/expenses') }}/' + editExpense.exp_id" method="POST" class="space-y-4">
+            <form :action="'{{ url('manager/expenses') }}/' + editExpense.exp_id" method="POST" @submit="if(isSubmitting) { $event.preventDefault(); return false; } isSubmitting = true" class="space-y-4">
                 @csrf
                 @method('PUT')
 
@@ -468,8 +475,14 @@
                     <button type="button" @click="editModalOpen = false" class="px-4 py-2.5 text-slate-600 font-bold text-xs">
                         Cancel
                     </button>
-                    <button type="submit" class="px-6 py-2.5 bg-rose-600 text-white font-bold text-xs shadow-md">
-                        Update Expense
+                    <button type="submit" :disabled="isSubmitting" class="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 disabled:opacity-70 disabled:cursor-not-allowed">
+                        <template x-if="isSubmitting">
+                            <svg class="animate-spin w-3.5 h-3.5 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                            </svg>
+                        </template>
+                        <span x-text="isSubmitting ? 'Updating...' : 'Update Expense'"></span>
                     </button>
                 </div>
             </form>

@@ -12,6 +12,7 @@ use App\Models\SaleItem;
 use App\Models\Store;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 
 class SaleController extends Controller
 {
@@ -172,7 +173,17 @@ class SaleController extends Controller
             'items.*.unit_price' => ['required', 'numeric', 'min:0'],
             'items.*.discount' => ['nullable', 'numeric', 'min:0'],
             'items.*.discount_type' => ['nullable', 'string', 'in:percentage,fixed'],
+            'form_submission_token' => ['nullable', 'string'],
         ]);
+
+        $submissionToken = $request->input('form_submission_token');
+        if ($submissionToken) {
+            $tokenKey = 'sale_submission_' . $submissionToken;
+            if (!Cache::add($tokenKey, true, now()->addMinutes(10))) {
+                return redirect()->route('manager.sales.index')
+                    ->with('info', 'This bill was already submitted and processed.');
+            }
+        }
 
         $storeId = !empty($validated['store_id']) ? (int) $validated['store_id'] : Store::getDefaultStore()->id;
         $store = Store::find($storeId);

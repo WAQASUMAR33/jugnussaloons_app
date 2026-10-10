@@ -6,10 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\AccountLedger;
 use App\Models\Appointment;
+use App\Models\AppointmentPayment;
 use App\Models\AppointmentService;
 use App\Models\SaloonService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use App\Services\ImageUploadService;
 
 class AppointmentController extends Controller
@@ -30,7 +32,7 @@ class AppointmentController extends Controller
         $employeeId = $request->input('employee_id');
         $ranking = $request->input('ranking');
 
-        $query = Appointment::with(['customer', 'employee.category', 'rankedBy', 'items.service']);
+        $query = Appointment::with(['customer', 'employee.category', 'rankedBy', 'bankAccount', 'items.service']);
 
         if ($search) {
             $query->where(function ($q) use ($search) {
@@ -105,10 +107,12 @@ class AppointmentController extends Controller
         }
 
         $brandSettings = \App\Models\Setting::getSettings();
+        $bankAccounts = \App\Models\BankAccount::where('is_active', true)->orderBy('bank_name')->get();
 
         return view('manager.appointments.index', compact(
             'appointments', 
             'employees',
+            'bankAccounts',
             'brandSettings',
             'search', 
             'status', 
@@ -133,7 +137,7 @@ class AppointmentController extends Controller
         $data = $this->getBookingFormData();
         $editingAppointment = null;
         if ($request->filled('edit')) {
-            $editingAppointment = Appointment::with(['customer', 'employee', 'items.service'])->find($request->input('edit'));
+            $editingAppointment = Appointment::with(['customer', 'employee', 'bankAccount', 'items.service'])->find($request->input('edit'));
         }
         $data['editingAppointment'] = $editingAppointment;
 
@@ -146,7 +150,7 @@ class AppointmentController extends Controller
     public function edit(Appointment $appointment)
     {
         $data = $this->getBookingFormData();
-        $data['editingAppointment'] = $appointment->load(['customer', 'employee', 'items.service']);
+        $data['editingAppointment'] = $appointment->load(['customer', 'employee', 'bankAccount', 'items.service']);
 
         return view('manager.appointments.create', $data);
     }
@@ -220,8 +224,24 @@ class AppointmentController extends Controller
             })->orWhereDoesntHave('category')->with('category')->orderBy('name')->get();
         }
 
+        $addOnService = SaloonService::where('id', 137)
+            ->orWhere('title', 'Add On')
+            ->orWhere('title', 'Ad On')
+            ->first();
+        if (!$addOnService) {
+            SaloonService::create([
+                'id' => 137,
+                'title' => 'Add On',
+                'price' => 0.00,
+                'discount' => 0.00,
+                'discounted_price' => 0.00,
+                'is_active' => true,
+            ]);
+        }
+
         $saloonServices = SaloonService::with('category')->orderBy('title')->get();
         $serviceCategories = \App\Models\ServiceCategory::with('services')->orderBy('title')->get();
+        $bankAccounts = \App\Models\BankAccount::where('is_active', true)->orderBy('bank_name')->get();
         $brandSettings = \App\Models\Setting::getSettings();
         $totalBookingsCount = Appointment::count();
 
@@ -232,6 +252,7 @@ class AppointmentController extends Controller
             'employees',
             'saloonServices',
             'serviceCategories',
+            'bankAccounts',
             'brandSettings',
             'totalBookingsCount'
         );
@@ -248,7 +269,7 @@ class AppointmentController extends Controller
             'employee_id' => ['nullable', 'exists:accounts,id'],
             'appointment_date' => ['required', 'date'],
             'start_time' => ['nullable', 'string'],
-            'status' => ['nullable', 'string', 'in:pending,confirmed,completed,cancelled'],
+            'status' => ['nullable', 'string', 'in:pending,confirmed,completed,cancelled,rejected'],
             'discount_type' => ['nullable', 'string', 'in:fixed,percentage'],
             'discount' => ['nullable', 'numeric', 'min:0'],
             'discount_percentage' => ['nullable', 'numeric', 'min:0', 'max:100'],
@@ -256,6 +277,7 @@ class AppointmentController extends Controller
             'notes' => ['nullable', 'string', 'max:1000'],
             'receipt_image' => ['nullable', 'file', 'image', 'max:5120'],
             'payment_mode' => ['nullable', 'string', 'in:Cash,Card,Bank,Other,Split'],
+            'bank_account_id' => ['nullable', 'exists:bank_accounts,bankid'],
             'split_payments' => ['nullable'],
             'extra_amount' => ['nullable', 'numeric', 'min:0'],
             'service_ids' => ['required', 'array', 'min:1'],
@@ -267,7 +289,17 @@ class AppointmentController extends Controller
             'service_discounts' => ['nullable', 'array'],
             'service_discount_types' => ['nullable', 'array'],
             'admin_password' => ['nullable', 'string'],
+            'form_submission_token' => ['nullable', 'string'],
         ]);
+
+        $submissionToken = $request->input('form_submission_token');
+        if ($submissionToken) {
+            $tokenKey = 'apt_submission_' . $submissionToken;
+            if (!Cache::add($tokenKey, true, now()->addMinutes(10))) {
+                return redirect()->route('manager.appointments.index')
+                    ->with('info', 'This bill was already submitted and processed.');
+            }
+        }
 
         $receiptPath = null;
         if ($request->hasFile('receipt_image')) {
@@ -302,6 +334,9 @@ class AppointmentController extends Controller
                     $paidAmount = array_sum($splitPayments);
                 }
             }
+
+            $isBankPayment = ($paymentMode === 'Bank') || ($paymentMode === 'Split' && !empty($splitPayments['Bank']) && $splitPayments['Bank'] > 0);
+            $bankAccountId = $isBankPayment ? (!empty($validated['bank_account_id']) ? (int) $validated['bank_account_id'] : null) : null;
 
             // Auto Generate Booking Number
             $bookingNo = 'APT-' . date('Ym') . '-' . str_pad(Appointment::count() + 1, 4, '0', STR_PAD_LEFT);
@@ -416,7 +451,7 @@ class AppointmentController extends Controller
             foreach ($processedLineItems as $item) {
                 $srv = $services[$item['saloon_service_id']] ?? null;
                 $isItemDiscounted = false;
-                $isAddonService = $this->isAddOnService($srv);
+                $isAddonService = $this->isAddOnService($srv, $item['custom_title'] ?? '');
                 if ($srv) {
                     $origPrice = (float) ($srv->price ?? 0);
                     $discPct = (float) ($srv->discount ?? 0);
@@ -515,6 +550,7 @@ class AppointmentController extends Controller
                 'notes' => $validated['notes'] ?? null,
                 'receipt_image' => $receiptPath,
                 'payment_mode' => $paymentMode,
+                'bank_account_id' => $bankAccountId,
                 'split_payments' => $splitPayments,
                 'extra_amount' => $extraAmount,
             ]);
@@ -526,47 +562,77 @@ class AppointmentController extends Controller
                 ]));
             }
 
-            // 3. Write Customer Ledger Entries
-            $newCustBalance = $customer->balance + $netAmount - $paidAmount;
-
-            AccountLedger::create([
-                'account_id' => $customer->id,
-                'date' => $appointmentDate,
-                'type' => 'sale',
-                'reference_no' => $bookingNo,
-                'description' => "Saloon Service Booking #{$bookingNo} (" . count($processedLineItems) . " services)",
-                'debit' => $netAmount,
-                'credit' => 0.00,
-                'running_balance' => $customer->balance + $netAmount,
-            ]);
-
-            if ($paidAmount > 0) {
-                $receivingDesc = "Payment received for Service Booking #{$bookingNo}";
-                if ($paymentMode === 'Split' && is_array($splitPayments)) {
-                    $parts = [];
-                    foreach ($splitPayments as $m => $val) {
-                        if ($val > 0) $parts[] = "{$m}: PKR " . number_format($val, 2);
-                    }
-                    if (!empty($parts)) {
-                        $receivingDesc .= " (Split: " . implode(', ', $parts) . ")";
-                    }
-                } elseif (!empty($paymentMode)) {
-                    $receivingDesc .= " ({$paymentMode})";
-                }
+            // 3. Write Customer Ledger Entries (Only if booking is active, not cancelled/rejected)
+            if (!in_array($appointmentStatus, ['cancelled', 'rejected'])) {
+                $newCustBalance = $customer->balance + $netAmount - $paidAmount;
 
                 AccountLedger::create([
                     'account_id' => $customer->id,
                     'date' => $appointmentDate,
-                    'type' => 'receiving',
-                    'reference_no' => $bookingNo . '-REC',
-                    'description' => $receivingDesc,
-                    'debit' => 0.00,
-                    'credit' => $paidAmount,
-                    'running_balance' => $newCustBalance,
+                    'type' => 'sale',
+                    'reference_no' => $bookingNo,
+                    'description' => "Saloon Service Booking #{$bookingNo} (" . count($processedLineItems) . " services)",
+                    'debit' => $netAmount,
+                    'credit' => 0.00,
+                    'running_balance' => $customer->balance + $netAmount,
                 ]);
+
+                if ($paidAmount > 0) {
+                    $receivingDesc = "Payment received for Service Booking #{$bookingNo}";
+                    if ($paymentMode === 'Split' && is_array($splitPayments)) {
+                        $parts = [];
+                        foreach ($splitPayments as $m => $val) {
+                            if ($val > 0) {
+                                if ($m === 'Bank' && $bankAccountId) {
+                                    $bankObj = \App\Models\BankAccount::find($bankAccountId);
+                                    $bName = $bankObj ? $bankObj->bank_name : 'Bank';
+                                    $parts[] = "{$bName}: PKR " . number_format($val, 2);
+                                } else {
+                                    $parts[] = "{$m}: PKR " . number_format($val, 2);
+                                }
+                            }
+                        }
+                        if (!empty($parts)) {
+                            $receivingDesc .= " (Split: " . implode(', ', $parts) . ")";
+                        }
+                    } elseif ($paymentMode === 'Bank' && $bankAccountId) {
+                        $bankObj = \App\Models\BankAccount::find($bankAccountId);
+                        $bankName = $bankObj ? $bankObj->bank_name : 'Bank';
+                        $receivingDesc .= " ({$bankName})";
+                    } elseif (!empty($paymentMode)) {
+                        $receivingDesc .= " ({$paymentMode})";
+                    }
+
+                    AccountLedger::create([
+                        'account_id' => $customer->id,
+                        'date' => $appointmentDate,
+                        'type' => 'receiving',
+                        'reference_no' => $bookingNo . '-REC',
+                        'description' => $receivingDesc,
+                        'debit' => 0.00,
+                        'credit' => $paidAmount,
+                        'running_balance' => $newCustBalance,
+                    ]);
+                }
+
+                $customer->update(['balance' => $newCustBalance]);
             }
 
-            $customer->update(['balance' => $newCustBalance]);
+            // 4. Record Initial Payment in AppointmentPayment table
+            if ($paidAmount > 0 && !in_array($appointmentStatus, ['cancelled', 'rejected'])) {
+                $payDate = $request->input('payment_date')
+                    ?? ($appointmentDate < now()->toDateString() ? $appointmentDate : now()->toDateString());
+
+                AppointmentPayment::create([
+                    'appointment_id' => $appointment->id,
+                    'payment_date' => $payDate,
+                    'amount' => $paidAmount,
+                    'payment_mode' => $paymentMode,
+                    'bank_account_id' => $bankAccountId,
+                    'split_payments' => $splitPayments,
+                    'notes' => 'Initial payment at booking',
+                ]);
+            }
         });
 
         return redirect()->route('manager.appointments.index')
@@ -583,7 +649,7 @@ class AppointmentController extends Controller
             'account_id' => ['required', 'exists:accounts,id'],
             'appointment_date' => ['required', 'date'],
             'start_time' => ['nullable', 'string'],
-            'status' => ['nullable', 'string', 'in:pending,confirmed,completed,cancelled'],
+            'status' => ['nullable', 'string', 'in:pending,confirmed,completed,cancelled,rejected'],
             'discount_type' => ['nullable', 'string', 'in:fixed,percentage'],
             'discount' => ['nullable', 'numeric', 'min:0'],
             'discount_percentage' => ['nullable', 'numeric', 'min:0', 'max:100'],
@@ -591,6 +657,7 @@ class AppointmentController extends Controller
             'notes' => ['nullable', 'string', 'max:1000'],
             'receipt_image' => ['nullable', 'file', 'image', 'max:5120'],
             'payment_mode' => ['nullable', 'string', 'in:Cash,Card,Bank,Other,Split'],
+            'bank_account_id' => ['nullable', 'exists:bank_accounts,bankid'],
             'split_payments' => ['nullable'],
             'extra_amount' => ['nullable', 'numeric', 'min:0'],
             'service_ids' => ['required', 'array', 'min:1'],
@@ -708,6 +775,9 @@ class AppointmentController extends Controller
                 }
             }
 
+            $isBankPayment = ($paymentMode === 'Bank') || ($paymentMode === 'Split' && !empty($splitPayments['Bank']) && $splitPayments['Bank'] > 0);
+            $bankAccountId = $isBankPayment ? (!empty($validated['bank_account_id']) ? (int) $validated['bank_account_id'] : null) : null;
+
             // Calculate service totals, custom titles, multi-quantities, and service-level discounts
             $serviceIds = $request->input('service_ids', []);
             $serviceQuantities = $request->input('service_quantities', []);
@@ -818,7 +888,7 @@ class AppointmentController extends Controller
             foreach ($processedLineItems as $item) {
                 $srv = $services[$item['saloon_service_id']] ?? null;
                 $isItemDiscounted = false;
-                $isAddonService = $this->isAddOnService($srv);
+                $isAddonService = $this->isAddOnService($srv, $item['custom_title'] ?? '');
                 if ($srv) {
                     $origPrice = (float) ($srv->price ?? 0);
                     $discPct = (float) ($srv->discount ?? 0);
@@ -920,6 +990,7 @@ class AppointmentController extends Controller
                 'notes' => $validated['notes'] ?? null,
                 'receipt_image' => $receiptPath,
                 'payment_mode' => $paymentMode,
+                'bank_account_id' => $bankAccountId,
                 'split_payments' => $splitPayments,
                 'extra_amount' => $extraAmount,
             ]);
@@ -931,47 +1002,123 @@ class AppointmentController extends Controller
                 ]));
             }
 
-            // 5. Create New Customer Ledgers
-            $newCustBalance = $customer->balance + $netAmount - $paidAmount;
-
-            AccountLedger::create([
-                'account_id' => $customer->id,
-                'date' => $appointmentDate,
-                'type' => 'sale',
-                'reference_no' => $bookingNo,
-                'description' => "Saloon Service Booking #{$bookingNo} (" . count($processedLineItems) . " services)",
-                'debit' => $netAmount,
-                'credit' => 0.00,
-                'running_balance' => $customer->balance + $netAmount,
-            ]);
-
-            if ($paidAmount > 0) {
-                $receivingDesc = "Payment received for Service Booking #{$bookingNo}";
-                if ($paymentMode === 'Split' && is_array($splitPayments)) {
-                    $parts = [];
-                    foreach ($splitPayments as $m => $val) {
-                        if ($val > 0) $parts[] = "{$m}: PKR " . number_format($val, 2);
-                    }
-                    if (!empty($parts)) {
-                        $receivingDesc .= " (Split: " . implode(', ', $parts) . ")";
-                    }
-                } elseif (!empty($paymentMode)) {
-                    $receivingDesc .= " ({$paymentMode})";
-                }
+            // 5. Create New Customer Ledgers (Only if booking is active, not cancelled/rejected)
+            if (!in_array($appointmentStatus, ['cancelled', 'rejected'])) {
+                $newCustBalance = $customer->balance + $netAmount - $paidAmount;
 
                 AccountLedger::create([
                     'account_id' => $customer->id,
                     'date' => $appointmentDate,
-                    'type' => 'receiving',
-                    'reference_no' => $bookingNo . '-REC',
-                    'description' => $receivingDesc,
-                    'debit' => 0.00,
-                    'credit' => $paidAmount,
-                    'running_balance' => $newCustBalance,
+                    'type' => 'sale',
+                    'reference_no' => $bookingNo,
+                    'description' => "Saloon Service Booking #{$bookingNo} (" . count($processedLineItems) . " services)",
+                    'debit' => $netAmount,
+                    'credit' => 0.00,
+                    'running_balance' => $customer->balance + $netAmount,
                 ]);
+
+                if ($paidAmount > 0) {
+                    $receivingDesc = "Payment received for Service Booking #{$bookingNo}";
+                    if ($paymentMode === 'Split' && is_array($splitPayments)) {
+                        $parts = [];
+                        foreach ($splitPayments as $m => $val) {
+                            if ($val > 0) {
+                                if ($m === 'Bank' && $bankAccountId) {
+                                    $bankObj = \App\Models\BankAccount::find($bankAccountId);
+                                    $bName = $bankObj ? $bankObj->bank_name : 'Bank';
+                                    $parts[] = "{$bName}: PKR " . number_format($val, 2);
+                                } else {
+                                    $parts[] = "{$m}: PKR " . number_format($val, 2);
+                                }
+                            }
+                        }
+                        if (!empty($parts)) {
+                            $receivingDesc .= " (Split: " . implode(', ', $parts) . ")";
+                        }
+                    } elseif ($paymentMode === 'Bank' && $bankAccountId) {
+                        $bankObj = \App\Models\BankAccount::find($bankAccountId);
+                        $bankName = $bankObj ? $bankObj->bank_name : 'Bank';
+                        $receivingDesc .= " ({$bankName})";
+                    } elseif (!empty($paymentMode)) {
+                        $receivingDesc .= " ({$paymentMode})";
+                    }
+
+                    AccountLedger::create([
+                        'account_id' => $customer->id,
+                        'date' => $appointmentDate,
+                        'type' => 'receiving',
+                        'reference_no' => $bookingNo . '-REC',
+                        'description' => $receivingDesc,
+                        'debit' => 0.00,
+                        'credit' => $paidAmount,
+                        'running_balance' => $newCustBalance,
+                    ]);
+                }
+
+                $customer->update(['balance' => $newCustBalance]);
+            } else {
+                // If booking is cancelled or rejected, ensure customer balance reflects latest ledger
+                $lastCustLedger = AccountLedger::where('account_id', $customer->id)->orderBy('id', 'desc')->first();
+                $customer->update(['balance' => $lastCustLedger ? $lastCustLedger->running_balance : 0.00]);
             }
 
-            $customer->update(['balance' => $newCustBalance]);
+            // 6. Synchronize AppointmentPayment records
+            if (!in_array($appointmentStatus, ['cancelled', 'rejected'])) {
+                $existingPaymentsSum = (float) $appointment->payments()->sum('amount');
+                if ($paidAmount > 0) {
+                    if ($existingPaymentsSum == 0) {
+                        $payDate = $request->input('payment_date')
+                            ?? ($appointmentDate < now()->toDateString() ? $appointmentDate : now()->toDateString());
+                        AppointmentPayment::create([
+                            'appointment_id' => $appointment->id,
+                            'payment_date' => $payDate,
+                            'amount' => $paidAmount,
+                            'payment_mode' => $paymentMode,
+                            'bank_account_id' => $bankAccountId,
+                            'split_payments' => $splitPayments,
+                            'notes' => 'Initial payment recorded during booking update',
+                        ]);
+                    } elseif ($paidAmount > $existingPaymentsSum) {
+                        $delta = round($paidAmount - $existingPaymentsSum, 2);
+                        $payDate = $request->input('payment_date') ?: now()->toDateString();
+                        AppointmentPayment::create([
+                            'appointment_id' => $appointment->id,
+                            'payment_date' => $payDate,
+                            'amount' => $delta,
+                            'payment_mode' => $paymentMode,
+                            'bank_account_id' => $bankAccountId,
+                            'split_payments' => $splitPayments,
+                            'notes' => 'Additional payment received on booking update',
+                        ]);
+                    } elseif ($paidAmount < $existingPaymentsSum) {
+                        $appointment->payments()->delete();
+                        $payDate = $request->input('payment_date')
+                            ?? ($appointmentDate < now()->toDateString() ? $appointmentDate : now()->toDateString());
+                        AppointmentPayment::create([
+                            'appointment_id' => $appointment->id,
+                            'payment_date' => $payDate,
+                            'amount' => $paidAmount,
+                            'payment_mode' => $paymentMode,
+                            'bank_account_id' => $bankAccountId,
+                            'split_payments' => $splitPayments,
+                            'notes' => 'Corrected payment on booking update',
+                        ]);
+                    } else {
+                        $firstPayment = $appointment->payments()->oldest()->first();
+                        if ($firstPayment && $appointment->payments()->count() === 1) {
+                            $firstPayment->update([
+                                'payment_mode' => $paymentMode,
+                                'bank_account_id' => $bankAccountId,
+                                'split_payments' => $splitPayments,
+                            ]);
+                        }
+                    }
+                } else {
+                    $appointment->payments()->delete();
+                }
+            } else {
+                $appointment->payments()->delete();
+            }
         });
 
         return redirect()->route('manager.appointments.index')
@@ -1030,13 +1177,101 @@ class AppointmentController extends Controller
     public function updateStatus(Request $request, Appointment $appointment)
     {
         $validated = $request->validate([
-            'status' => ['required', 'in:pending,confirmed,completed,cancelled'],
+            'status' => ['required', 'in:pending,confirmed,completed,cancelled,rejected'],
         ]);
 
-        $appointment->update(['status' => $validated['status']]);
+        $newStatus = $validated['status'];
+        $appointment->update(['status' => $newStatus]);
 
-        return redirect()->route('manager.appointments.index')
-            ->with('success', "Appointment #{$appointment->booking_no} status updated to " . ucfirst($validated['status']) . "!");
+        if (in_array($newStatus, ['cancelled', 'rejected'])) {
+            // Remove payments associated with this cancelled/rejected booking
+            $appointment->payments()->delete();
+            // Remove ledger entries associated with this cancelled/rejected booking
+            $bookingNo = $appointment->booking_no;
+            AccountLedger::where('reference_no', 'like', "%{$bookingNo}%")->delete();
+            if ($appointment->customer) {
+                $lastCustLedger = AccountLedger::where('account_id', $appointment->customer->id)->orderBy('id', 'desc')->first();
+                $appointment->customer->update(['balance' => $lastCustLedger ? $lastCustLedger->running_balance : 0.00]);
+            }
+        }
+
+        return redirect()->back()
+            ->with('success', "Appointment #{$appointment->booking_no} status updated to " . ucfirst($newStatus) . "!");
+    }
+
+    /**
+     * Pay remaining balance directly for an appointment booking.
+     */
+    public function payRemaining(Request $request, Appointment $appointment)
+    {
+        $validated = $request->validate([
+            'payment_amount' => ['required', 'numeric', 'min:0.01', 'max:' . max(0.01, (float)$appointment->balance_due)],
+            'payment_date' => ['nullable', 'date'],
+            'payment_mode' => ['nullable', 'string', 'in:Cash,Card,Bank,Other'],
+            'bank_account_id' => ['nullable', 'exists:bank_accounts,bankid'],
+            'notes' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $amountToPay = (float) $validated['payment_amount'];
+        $paymentMode = $validated['payment_mode'] ?? 'Cash';
+        $paymentDate = !empty($validated['payment_date']) ? $validated['payment_date'] : now()->toDateString();
+        $bankAccountId = in_array($paymentMode, ['Bank', 'Card']) ? ($validated['bank_account_id'] ?? null) : null;
+        $notes = $validated['notes'] ?? 'Remaining balance payment';
+
+        DB::transaction(function () use ($appointment, $amountToPay, $paymentMode, $paymentDate, $bankAccountId, $notes) {
+            $customer = $appointment->customer;
+            $newPaidAmount = round($appointment->paid_amount + $amountToPay, 2);
+            $newBalanceDue = max(0, round($appointment->net_amount - $newPaidAmount, 2));
+
+            $updateData = [
+                'paid_amount' => $newPaidAmount,
+                'balance_due' => $newBalanceDue,
+            ];
+            if ($newBalanceDue <= 0 && $appointment->status === 'pending') {
+                $updateData['status'] = 'confirmed';
+            }
+            $appointment->update($updateData);
+
+            // Record this specific payment event on its exact payment_date
+            AppointmentPayment::create([
+                'appointment_id' => $appointment->id,
+                'payment_date' => $paymentDate,
+                'amount' => $amountToPay,
+                'payment_mode' => $paymentMode,
+                'bank_account_id' => $bankAccountId,
+                'notes' => $notes,
+            ]);
+
+            // Ledger entry for customer receiving
+            if ($customer) {
+                $newCustBalance = $customer->balance - $amountToPay;
+                $refNo = $appointment->booking_no . '-REC-' . time();
+
+                $bankName = '';
+                if ($bankAccountId) {
+                    $bankObj = \App\Models\BankAccount::find($bankAccountId);
+                    if ($bankObj) {
+                        $bankName = " ({$bankObj->bank_name})";
+                    }
+                }
+
+                AccountLedger::create([
+                    'account_id' => $customer->id,
+                    'date' => $paymentDate,
+                    'type' => 'receiving',
+                    'reference_no' => $refNo,
+                    'description' => "Balance payment of PKR " . number_format($amountToPay, 2) . " received for Booking #{$appointment->booking_no} ({$paymentMode}{$bankName})",
+                    'debit' => 0.00,
+                    'credit' => $amountToPay,
+                    'running_balance' => $newCustBalance,
+                ]);
+
+                $customer->update(['balance' => $newCustBalance]);
+            }
+        });
+
+        return redirect()->back()
+            ->with('success', "Payment of PKR " . number_format($amountToPay, 2) . " recorded successfully for Booking #{$appointment->booking_no}!");
     }
 
     /**
@@ -1069,13 +1304,24 @@ class AppointmentController extends Controller
     }
 
     /**
-     * Detect if a SaloonService is an Add-On service by its title or category name.
+     * Detect if a SaloonService is an Add-On service by its title, ID, or custom title.
      * Add-On services are NEVER eligible for bill-level discounts.
      * Mirrors the JS isAddOn() detection in the appointments view.
      */
-    private function isAddOnService(?\App\Models\SaloonService $srv): bool
+    private function isAddOnService(?\App\Models\SaloonService $srv, string $customTitle = ''): bool
     {
+        if (!empty($customTitle)) {
+            $cTitle = strtolower(trim($customTitle));
+            foreach (['ad on', 'add on', 'adon', 'addon'] as $kw) {
+                if (str_contains($cTitle, $kw)) return true;
+            }
+        }
+
         if (!$srv) return false;
+
+        if ($srv->id == 137) {
+            return true;
+        }
 
         $catTitle = strtolower(trim($srv->category->title ?? ''));
         $srvTitle = strtolower(trim($srv->title ?? ''));
@@ -1090,3 +1336,4 @@ class AppointmentController extends Controller
         return false;
     }
 }
+

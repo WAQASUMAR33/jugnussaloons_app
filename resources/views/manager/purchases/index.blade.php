@@ -6,6 +6,7 @@
 <div x-data="{ 
     createModalOpen: false,
     viewModalOpen: false,
+    isSubmitting: false,
     selectedPurchase: null,
     suppliersList: {{ json_encode($suppliers) }},
     productsList: {{ json_encode($products) }},
@@ -241,7 +242,7 @@
                 </button>
             </div>
 
-            <form method="POST" action="{{ route('manager.purchases.store') }}" class="space-y-4">
+            <form method="POST" action="{{ route('manager.purchases.store') }}" @submit="if(isSubmitting) { $event.preventDefault(); return false; } isSubmitting = true" class="space-y-4">
                 @csrf
                 
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -428,8 +429,15 @@
                     <button type="button" @click="createModalOpen = false" class="px-4 py-2.5 text-slate-600 font-bold text-xs">
                         Cancel
                     </button>
-                    <button type="submit" class="px-6 py-2.5 bg-amber-600 text-white font-bold text-xs shadow-md">
-                        Save Purchase & Update Stock
+                    <button type="submit" :disabled="isSubmitting" 
+                            class="px-6 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 disabled:opacity-70 disabled:cursor-not-allowed">
+                        <template x-if="isSubmitting">
+                            <svg class="animate-spin w-3.5 h-3.5 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                            </svg>
+                        </template>
+                        <span x-text="isSubmitting ? 'Saving Purchase...' : 'Save Purchase & Update Stock'"></span>
                     </button>
                 </div>
             </form>

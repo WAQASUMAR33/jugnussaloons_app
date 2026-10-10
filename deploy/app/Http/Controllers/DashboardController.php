@@ -23,6 +23,7 @@ class DashboardController extends Controller
 
         // 1. Revenue Metrics (Appointments paid + Product Sales) - Batched in 2 queries
         $appointmentRevs = Appointment::whereIn('appointment_date', [$yesterday, $today])
+            ->whereNotIn('status', ['cancelled', 'rejected'])
             ->selectRaw('appointment_date, SUM(paid_amount) as total')
             ->groupBy('appointment_date')
             ->pluck('total', 'appointment_date');

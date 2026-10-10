@@ -169,6 +169,9 @@ function posSaleTerminal() {
     receiptModalOpen: false,
     receiptData: null,
 
+    // Submission Guard State
+    isSubmitting: false,
+
     init() {
         this.recalculateTotals();
         this.loadHeldBills();
@@ -912,6 +915,8 @@ function posSaleTerminal() {
 
     // Submission
     submitForm(isPrint = false) {
+        if (this.isSubmitting) return;
+
         if (this.items.length === 0) {
             alert('Please select at least one product to sell.');
             return;
@@ -949,9 +954,16 @@ function posSaleTerminal() {
         }
 
         const form = document.getElementById('posSaleForm');
+        if (!form) return;
+
+        this.isSubmitting = true;
+
         if (isPrint) {
             const data = this.generateReceiptData();
-            if (!data) return;
+            if (!data) {
+                this.isSubmitting = false;
+                return;
+            }
             this.receiptData = data;
             this.printReceiptHtml(data, () => {
                 form.submit();
@@ -1009,8 +1021,9 @@ function posSaleTerminal() {
     <!-- TAB 1: 3-COLUMN POS BILLING TERMINAL (MATCHING APPOINTMENTS LAYOUT) -->
     <div x-show="activeTab === 'pos'" class="space-y-5">
         
-        <form id="posSaleForm" method="POST" :action="editingSaleId ? ('{{ url('manager/sales') }}/' + editingSaleId) : '{{ route('manager.sales.store') }}'">
+        <form id="posSaleForm" method="POST" :action="editingSaleId ? ('{{ url('manager/sales') }}/' + editingSaleId) : '{{ route('manager.sales.store') }}'" @submit="if(isSubmitting) { $event.preventDefault(); return false; } isSubmitting = true;">
             @csrf
+            <input type="hidden" name="form_submission_token" value="{{ (string) \Illuminate\Support\Str::uuid() }}">
             <template x-if="editingSaleId">
                 <input type="hidden" name="_method" value="PUT">
             </template>
@@ -1851,34 +1864,71 @@ function posSaleTerminal() {
 
                         <!-- Regular Buttons (Normal Sales Mode) -->
                         <div x-show="!isIssueStockStore()" class="grid grid-cols-3 gap-2.5">
-                            <button type="button" @click="holdCurrentBill()" 
-                                    class="py-3 px-2 bg-amber-50 hover:bg-amber-100 text-amber-900 font-extrabold text-xs rounded-none transition-all flex items-center justify-center gap-1 border border-amber-300 shadow-2xs">
+                            <button type="button" @click="holdCurrentBill()" :disabled="isSubmitting"
+                                    class="py-3 px-2 bg-amber-50 hover:bg-amber-100 text-amber-900 font-extrabold text-xs rounded-none transition-all flex items-center justify-center gap-1 border border-amber-300 shadow-2xs"
+                                    :class="{ 'opacity-50 cursor-not-allowed pointer-events-none': isSubmitting }">
                                 <svg class="w-4 h-4 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                 <span>Hold Bill</span>
                             </button>
-                            <button type="button" @click="submitForm(true)" 
-                                    class="py-3 px-2 bg-slate-800 hover:bg-slate-900 text-white font-extrabold text-xs rounded-none transition-all flex items-center justify-center gap-1 border border-slate-900 shadow-2xs cursor-pointer">
-                                <svg class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
-                                <span>Save & Print 80mm</span>
+                            <button type="button" @click="submitForm(true)" :disabled="isSubmitting"
+                                    class="py-3 px-2 bg-slate-800 hover:bg-slate-900 text-white font-extrabold text-xs rounded-none transition-all flex items-center justify-center gap-1.5 border border-slate-900 shadow-2xs cursor-pointer"
+                                    :class="{ 'opacity-70 cursor-not-allowed pointer-events-none': isSubmitting }">
+                                <template x-if="isSubmitting">
+                                    <svg class="animate-spin w-4 h-4 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                    </svg>
+                                </template>
+                                <template x-if="!isSubmitting">
+                                    <svg class="w-4 h-4 text-slate-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
+                                </template>
+                                <span x-text="isSubmitting ? 'Processing...' : 'Save & Print 80mm'"></span>
                             </button>
-                            <button type="button" @click="submitForm(false)" 
-                                    class="py-3 px-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-none transition-all flex items-center justify-center gap-1 shadow-xs cursor-pointer">
-                                <svg class="w-4 h-4 fill-none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                                <span x-text="editingSaleId ? 'Update & Save Payment' : 'Complete'"></span>
+                            <button type="button" @click="submitForm(false)" :disabled="isSubmitting"
+                                    class="py-3 px-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-none transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                                    :class="{ 'opacity-70 cursor-not-allowed pointer-events-none': isSubmitting }">
+                                <template x-if="isSubmitting">
+                                    <svg class="animate-spin w-4 h-4 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                    </svg>
+                                </template>
+                                <template x-if="!isSubmitting">
+                                    <svg class="w-4 h-4 fill-none shrink-0" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                                </template>
+                                <span x-text="isSubmitting ? 'Processing...' : (editingSaleId ? 'Update & Save Payment' : 'Complete')"></span>
                             </button>
                         </div>
 
                         <!-- Direct Stock Out Action Buttons (ISSUE STOCK Mode) -->
                         <div x-show="isIssueStockStore()" class="grid grid-cols-3 gap-2.5">
-                            <button type="button" @click="submitForm(false)" 
-                                    class="col-span-2 py-3.5 px-4 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black text-xs rounded-none transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer border border-amber-500">
-                                <span class="text-sm">⚡</span>
-                                <span>Confirm Stock Out (Issue Stock)</span>
+                            <button type="button" @click="submitForm(false)" :disabled="isSubmitting"
+                                    class="col-span-2 py-3.5 px-4 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black text-xs rounded-none transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer border border-amber-500"
+                                    :class="{ 'opacity-70 cursor-not-allowed pointer-events-none': isSubmitting }">
+                                <template x-if="isSubmitting">
+                                    <svg class="animate-spin w-4 h-4 text-slate-950 shrink-0" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                    </svg>
+                                </template>
+                                <template x-if="!isSubmitting">
+                                    <span class="text-sm">⚡</span>
+                                </template>
+                                <span x-text="isSubmitting ? 'Processing...' : 'Confirm Stock Out (Issue Stock)'"></span>
                             </button>
-                            <button type="button" @click="submitForm(true)" 
-                                    class="py-3.5 px-3 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs rounded-none transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer">
-                                <svg class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
-                                <span>Print Slip</span>
+                            <button type="button" @click="submitForm(true)" :disabled="isSubmitting"
+                                    class="py-3.5 px-3 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs rounded-none transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                                    :class="{ 'opacity-70 cursor-not-allowed pointer-events-none': isSubmitting }">
+                                <template x-if="isSubmitting">
+                                    <svg class="animate-spin w-4 h-4 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                    </svg>
+                                </template>
+                                <template x-if="!isSubmitting">
+                                    <svg class="w-4 h-4 text-slate-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
+                                </template>
+                                <span x-text="isSubmitting ? 'Processing...' : 'Print Slip'"></span>
                             </button>
                         </div>
 
@@ -2326,7 +2376,7 @@ function posSaleTerminal() {
                                         Due: PKR <span x-text="Number(selectedSale.balance_due).toLocaleString()"></span>
                                     </span>
                                 </div>
-                                <form :action="'{{ url('manager/sales') }}/' + selectedSale.id + '/pay-remaining'" method="POST" class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <form x-data="{ isSubmitting: false }" :action="'{{ url('manager/sales') }}/' + selectedSale.id + '/pay-remaining'" method="POST" @submit="if(isSubmitting) { $event.preventDefault(); return false; } isSubmitting = true" class="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                     @csrf
                                     <div>
                                         <label class="block text-[10px] font-bold text-slate-500 mb-0.5">Amount to Pay</label>
@@ -2343,8 +2393,15 @@ function posSaleTerminal() {
                                         </select>
                                     </div>
                                     <div class="flex items-end">
-                                        <button type="submit" class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-none transition-colors shadow-xs cursor-pointer">
-                                            ✓ Pay Now
+                                        <button type="submit" :disabled="isSubmitting"
+                                                class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-none transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-70 disabled:cursor-not-allowed">
+                                            <template x-if="isSubmitting">
+                                                <svg class="animate-spin w-3.5 h-3.5 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                                </svg>
+                                            </template>
+                                            <span x-text="isSubmitting ? 'Paying...' : '✓ Pay Now'"></span>
                                         </button>
                                     </div>
                                 </form>

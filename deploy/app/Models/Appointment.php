@@ -35,6 +35,7 @@ class Appointment extends Model
         'notes',
         'receipt_image',
         'payment_mode',
+        'bank_account_id',
         'split_payments',
         'extra_amount',
     ];
@@ -101,10 +102,26 @@ class Appointment extends Model
     }
 
     /**
+     * Payment transactions received for this appointment.
+     */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(AppointmentPayment::class, 'appointment_id');
+    }
+
+    /**
      * Admin user who approved the discount.
      */
     public function discountApprover(): BelongsTo
     {
         return $this->belongsTo(User::class, 'discount_approved_by');
+    }
+
+    /**
+     * Bank account if paid via bank.
+     */
+    public function bankAccount(): BelongsTo
+    {
+        return $this->belongsTo(BankAccount::class, 'bank_account_id', 'bankid');
     }
 }

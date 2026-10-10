@@ -64,7 +64,7 @@
                 <td class="label">Stylist Scope:</td>
                 <td class="val">{{ $employeeId ? ($employees->firstWhere('id', $employeeId)->name ?? 'Selected') : 'All Stylists & Specialists' }}</td>
                 <td class="label">Print Date/Time:</td>
-                <td class="val">{{ now()->format('d-M-Y h:i:s A') }} | By: {{ Auth::user()->name }}</td>
+                <td class="val">{{ now()->format('d-M-Y h:i:s A') }} | By: {{ Auth::user()?->name ?? 'System' }}</td>
             </tr>
         </table>
     </div>
@@ -228,7 +228,6 @@
                             <th class="py-2.5 px-4 text-right">Gross Bill</th>
                             <th class="py-2.5 px-4 text-right">Discount</th>
                             <th class="py-2.5 px-4 text-right">Net Revenue</th>
-                            <th class="py-2.5 px-4 text-right">Commission Paid</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-100 font-semibold">
@@ -240,11 +239,10 @@
                             <td class="py-2 px-4 text-right text-slate-700">{{ number_format($db->gross_amount, 2) }}</td>
                             <td class="py-2 px-4 text-right text-rose-600 font-semibold">{{ number_format($db->discount_amount, 2) }}</td>
                             <td class="py-2 px-4 text-right text-emerald-700 font-black">{{ number_format($db->net_amount, 2) }}</td>
-                            <td class="py-2 px-4 text-right text-purple-700 font-bold">{{ number_format($db->total_commission, 2) }}</td>
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="7" class="py-8 text-center text-slate-400">No date-wise booking record found for selected filters.</td>
+                            <td colspan="6" class="py-8 text-center text-slate-400">No date-wise booking record found for selected filters.</td>
                         </tr>
                         @endforelse
                     </tbody>
@@ -255,7 +253,6 @@
                             <td class="py-2 px-4 text-right">{{ number_format($totalGrossRevenue, 2) }}</td>
                             <td class="py-2 px-4 text-right">{{ number_format($totalDiscount, 2) }}</td>
                             <td class="py-2 px-4 text-right">{{ number_format($totalNetRevenue, 2) }}</td>
-                            <td class="py-2 px-4 text-right">{{ number_format($totalCommission, 2) }}</td>
                         </tr>
                     </tfoot>
                 </table>
@@ -277,7 +274,6 @@
                             <th class="py-2.5 px-4">Service Category</th>
                             <th class="py-2.5 px-4 text-right">Treatments Count</th>
                             <th class="py-2.5 px-4 text-right">Total Net Revenue</th>
-                            <th class="py-2.5 px-4 text-right">Commission Paid</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-100 font-semibold">
@@ -287,11 +283,10 @@
                             <td class="py-2 px-4 font-bold text-slate-900">{{ $cb->category_title }}</td>
                             <td class="py-2 px-4 text-right font-bold text-indigo-600">{{ number_format($cb->service_count) }}</td>
                             <td class="py-2 px-4 text-right text-emerald-700 font-black">{{ number_format($cb->total_revenue, 2) }}</td>
-                            <td class="py-2 px-4 text-right text-purple-700 font-bold">{{ number_format($cb->total_commission, 2) }}</td>
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="5" class="py-8 text-center text-slate-400">No category-wise service record found for selected filters.</td>
+                            <td colspan="4" class="py-8 text-center text-slate-400">No category-wise service record found for selected filters.</td>
                         </tr>
                         @endforelse
                     </tbody>
@@ -299,8 +294,7 @@
                         <tr class="font-black">
                             <td colspan="2" class="py-2 px-3 text-right uppercase">Grand Total:</td>
                             <td class="py-2 px-4 text-right">{{ number_format($categorywiseBreakdown->sum('service_count')) }}</td>
-                            <td class="py-2 px-4 text-right">{{ number_format($totalNetRevenue, 2) }}</td>
-                            <td class="py-2 px-4 text-right">{{ number_format($totalCommission, 2) }}</td>
+                            <td class="py-2 px-4 text-right">{{ number_format($categorywiseBreakdown->sum('total_revenue'), 2) }}</td>
                         </tr>
                     </tfoot>
                 </table>
@@ -326,7 +320,6 @@
                             <th class="py-2.5 px-3">Assigned Stylist</th>
                             <th class="py-2.5 px-4">Treatments & Categories</th>
                             <th class="py-2.5 px-3 text-right">Net Bill</th>
-                            <th class="py-2.5 px-3 text-right">Commission</th>
                             <th class="py-2.5 px-3 text-center">Status</th>
                         </tr>
                     </thead>
@@ -348,8 +341,9 @@
                             <td class="py-2 px-4">
                                 <div class="space-y-0.5 max-w-xs">
                                     @foreach($apt->items as $item)
+                                        @if(!$serviceCategoryId || ($item->service && $item->service->service_category_id == $serviceCategoryId))
                                         <div class="text-[11px] leading-tight">
-                                            <span class="font-bold text-slate-900">• {{ $item->service->title ?? 'Service' }}</span>
+                                            <span class="font-bold text-slate-900">• {{ $item->custom_title ?: ($item->service->title ?? 'Service') }}</span>
                                             @if($item->service && $item->service->category)
                                                 <span class="text-[9.5px] text-indigo-700 font-semibold ml-1">
                                                     ({{ $item->service->category->title }})
@@ -357,11 +351,11 @@
                                             @endif
                                             <span class="text-[9.5px] text-slate-500 ml-1">{{ number_format($item->discounted_price, 2) }}</span>
                                         </div>
+                                        @endif
                                     @endforeach
                                 </div>
                             </td>
-                            <td class="py-2 px-3 text-right font-black text-slate-900">{{ number_format($apt->net_amount, 2) }}</td>
-                            <td class="py-2 px-3 text-right font-bold text-purple-700">{{ number_format($apt->total_commission, 2) }}</td>
+                            <td class="py-2 px-3 text-right font-black text-slate-900">{{ number_format($apt->display_net_amount ?? $apt->net_amount, 2) }}</td>
                             <td class="py-2 px-3 text-center uppercase font-bold text-[9.5pt]">
                                 @if($apt->status == 'completed')
                                     <span class="text-emerald-700">Completed</span>
@@ -376,7 +370,7 @@
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="9" class="py-12 text-center text-slate-400 font-semibold">
+                            <td colspan="8" class="py-12 text-center text-slate-400 font-semibold">
                                 No service bookings found for the selected date range and filters.
                             </td>
                         </tr>
@@ -386,7 +380,6 @@
                         <tr class="font-black">
                             <td colspan="6" class="py-2 px-3 text-right uppercase">Summary Grand Total:</td>
                             <td class="py-2 px-3 text-right">{{ number_format($totalNetRevenue, 2) }}</td>
-                            <td class="py-2 px-3 text-right">{{ number_format($totalCommission, 2) }}</td>
                             <td class="py-2 px-3 text-center text-[10px] text-slate-500">{{ number_format($totalAppointmentsCount) }} Bookings</td>
                         </tr>
                     </tfoot>

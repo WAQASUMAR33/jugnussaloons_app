@@ -281,6 +281,22 @@
                         <span>{{ $netBankFlow >= 0 ? '+' : '' }}Rs. {{ number_format($netBankFlow, 2) }}</span>
                     </div>
                 </div>
+
+                @if(isset($bankBreakdown) && count($bankBreakdown) > 0)
+                <div class="mt-3 pt-2.5 border-t border-indigo-400/20 space-y-1">
+                    <div class="text-[9.5px] uppercase font-black text-indigo-200 tracking-wider">Account-Wise Holding:</div>
+                    <div class="space-y-1 text-[11px]">
+                        @foreach($bankBreakdown as $b)
+                            @if($b['total_received'] > 0 || $b['total_paid'] > 0)
+                            <div class="flex items-center justify-between text-indigo-100 bg-white/10 px-2 py-0.5 rounded">
+                                <span class="truncate max-w-[150px] font-medium">{{ $b['bank_name'] }}:</span>
+                                <span class="font-bold text-white">Rs. {{ number_format($b['net_flow'], 2) }}</span>
+                            </div>
+                            @endif
+                        @endforeach
+                    </div>
+                </div>
+                @endif
             </div>
 
             <!-- CARD 3: GRAND CONSOLIDATED POSITION -->
@@ -1064,10 +1080,30 @@
                             <td class="py-3 px-4 font-mono font-bold text-slate-900">{{ $apt->booking_no }}</td>
                             <td class="py-3 px-4 font-bold">{{ $apt->customer->name ?? 'Walk-in Client' }}</td>
                             <td class="py-3 px-4">
-                                @php $isBank = in_array(strtolower($apt->payment_mode ?? ''), ['bank', 'card', 'bank transfer', 'online']); @endphp
-                                <span class="px-2.5 py-1 rounded-md text-[10px] font-black {{ $isBank ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200' }}">
-                                    {{ $isBank ? '🏦 ' . ($apt->payment_mode ?: 'Bank') : '💵 Cash' }}
-                                </span>
+                                @php 
+                                    $pMode = strtolower($apt->payment_mode ?? '');
+                                    $isBank = in_array($pMode, ['bank', 'card', 'bank transfer', 'online']);
+                                    $isSplit = ($pMode === 'split');
+                                @endphp
+                                @if($isBank)
+                                    <span class="inline-flex flex-col items-start px-2.5 py-1 rounded-md text-[10px] font-black bg-indigo-100 text-indigo-800 border border-indigo-200">
+                                        <span>🏦 {{ $apt->bankAccount ? $apt->bankAccount->bank_name : ($apt->payment_mode ?: 'Bank') }}</span>
+                                        @if($apt->bankAccount && $apt->bankAccount->account_no)
+                                            <span class="text-[9px] font-mono text-indigo-600 font-medium">A/C: {{ $apt->bankAccount->account_no }}</span>
+                                        @endif
+                                    </span>
+                                @elseif($isSplit)
+                                    <span class="inline-flex flex-col items-start px-2.5 py-1 rounded-md text-[10px] font-black bg-purple-100 text-purple-800 border border-purple-200">
+                                        <span>🔀 Split Payment</span>
+                                        @if($apt->bankAccount)
+                                            <span class="text-[9px] font-bold text-indigo-700">Bank: {{ $apt->bankAccount->bank_name }}</span>
+                                        @endif
+                                    </span>
+                                @else
+                                    <span class="px-2.5 py-1 rounded-md text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                        💵 Cash
+                                    </span>
+                                @endif
                             </td>
                             <td class="py-3 px-4 text-right text-slate-500">Rs. {{ number_format($apt->net_amount, 2) }}</td>
                             <td class="py-3 px-4 text-right font-black text-emerald-700">Rs. {{ number_format($apt->paid_amount, 2) }}</td>
@@ -1251,44 +1287,148 @@
             <div class="flex items-center justify-between">
                 <div>
                     <h3 class="text-base font-black text-slate-900 heading-font">Active Digital & Bank Accounts</h3>
-                    <p class="text-xs text-slate-500 mt-0.5">Overview of registered digital payment channels (JazzCash, Easypaisa, Meezan, etc.)</p>
+                    <p class="text-xs text-slate-500 mt-0.5">Real-time balances and money received into each bank account on {{ \Carbon\Carbon::parse($date)->format('d M Y') }}</p>
                 </div>
                 <div class="text-xs font-black text-indigo-800 bg-indigo-50 px-3.5 py-1.5 rounded-xl border border-indigo-200">
                     Net Digital Flow: {{ $netBankFlow >= 0 ? '+' : '' }}Rs. {{ number_format($netBankFlow, 2) }}
                 </div>
             </div>
 
+            <!-- BANK CARDS WITH MONEY RECEIVED & HELD TODAY -->
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                @foreach($bankAccounts as $ba)
-                <div class="p-5 rounded-3xl border border-slate-200/80 bg-slate-50/70 hover:bg-white hover:border-indigo-300 transition-all shadow-xs space-y-3">
+                @foreach($bankBreakdown as $bKey => $bInfo)
+                <div class="p-5 rounded-3xl border border-slate-200/80 bg-white hover:border-indigo-300 transition-all shadow-sm space-y-3.5">
                     <div class="flex items-center justify-between">
-                        <span class="text-xs font-black text-indigo-900 uppercase tracking-wider">{{ $ba->bank_name }}</span>
-                        <span class="px-2 py-0.5 rounded-md text-[9px] font-black bg-emerald-100 text-emerald-800">Active</span>
+                        <span class="text-xs font-black text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
+                            <span class="text-base">🏦</span>
+                            <span>{{ $bInfo['bank_name'] }}</span>
+                        </span>
+                        <span class="px-2 py-0.5 rounded-md text-[9px] font-black {{ $bInfo['net_flow'] > 0 ? 'bg-emerald-100 text-emerald-800' : ($bInfo['net_flow'] < 0 ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-600') }}">
+                            {{ $bInfo['net_flow'] > 0 ? 'Net Inflow' : ($bInfo['net_flow'] < 0 ? 'Net Outflow' : 'Balanced') }}
+                        </span>
                     </div>
-                    <div>
-                        <div class="text-sm font-black text-slate-900">{{ $ba->account_title }}</div>
-                        <div class="text-xs text-slate-500 font-mono tracking-wider mt-0.5">{{ $ba->account_no }}</div>
+
+                    <div class="bg-slate-50/80 p-3 rounded-2xl border border-slate-100 space-y-0.5">
+                        <div class="text-xs font-black text-slate-900">{{ $bInfo['account_title'] }}</div>
+                        <div class="text-[11px] text-slate-500 font-mono tracking-wider">{{ $bInfo['account_no'] }}</div>
+                        @if(!empty($bInfo['branch_name']))
+                            <div class="text-[10px] text-slate-400">{{ $bInfo['branch_name'] }}</div>
+                        @endif
+                        @if(!empty($bInfo['iban']))
+                            <div class="text-[9.5px] text-slate-400 font-mono">IBAN: {{ $bInfo['iban'] }}</div>
+                        @endif
                     </div>
-                    @if($ba->iban)
-                        <div class="text-[10px] text-slate-400 font-mono">IBAN: {{ $ba->iban }}</div>
-                    @endif
+
+                    <!-- Flow Stats Breakdown -->
+                    <div class="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 text-xs">
+                        <div class="p-2.5 rounded-xl bg-emerald-50/60 border border-emerald-100/80">
+                            <span class="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block">Money In (Received)</span>
+                            <span class="text-sm font-black text-emerald-700">Rs. {{ number_format($bInfo['total_received'], 2) }}</span>
+                            @if($bInfo['appointments_count'] > 0)
+                                <span class="text-[9.5px] text-emerald-600 font-medium block mt-0.5">{{ $bInfo['appointments_count'] }} bookings</span>
+                            @endif
+                        </div>
+                        <div class="p-2.5 rounded-xl bg-rose-50/60 border border-rose-100/80">
+                            <span class="text-[10px] font-bold text-rose-800 uppercase tracking-wider block">Money Out (Paid)</span>
+                            <span class="text-sm font-black text-rose-700">Rs. {{ number_format($bInfo['total_paid'], 2) }}</span>
+                        </div>
+                    </div>
+
+                    <!-- Net Holding Today -->
+                    <div class="p-3 rounded-2xl {{ $bInfo['net_flow'] >= 0 ? 'bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-100' : 'bg-gradient-to-r from-rose-50 to-pink-50 border border-rose-100' }} flex items-center justify-between">
+                        <div>
+                            <span class="text-[10px] font-black uppercase text-indigo-950 tracking-wider">Day's Net Holding:</span>
+                            <div class="text-base font-black {{ $bInfo['net_flow'] >= 0 ? 'text-indigo-950' : 'text-rose-700' }} heading-font">
+                                {{ $bInfo['net_flow'] >= 0 ? '+' : '' }}Rs. {{ number_format($bInfo['net_flow'], 2) }}
+                            </div>
+                        </div>
+                        <span class="text-lg">{{ $bInfo['net_flow'] >= 0 ? '📈' : '📉' }}</span>
+                    </div>
                 </div>
                 @endforeach
             </div>
 
+            <!-- ITEMIZED BANK BREAKDOWN TABLE -->
+            <div class="rounded-3xl border border-slate-200 bg-white overflow-hidden shadow-xs">
+                <div class="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                    <div>
+                        <h4 class="text-xs font-black uppercase tracking-wider text-slate-900">Detailed Bank Account Movement Sheet</h4>
+                        <p class="text-[11px] text-slate-500 font-medium">Reconciliation of inflows and disbursements per bank on {{ \Carbon\Carbon::parse($date)->format('d M Y') }}</p>
+                    </div>
+                    <span class="text-xs font-black text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-200">
+                        {{ count($bankBreakdown) }} Bank Accounts
+                    </span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs border-collapse">
+                        <thead>
+                            <tr class="bg-slate-100/80 border-b border-slate-200 text-slate-600 font-black uppercase text-[10px] tracking-wider">
+                                <th class="py-3 px-4">Bank / Channel</th>
+                                <th class="py-3 px-4">Account Title & Number</th>
+                                <th class="py-3 px-4 text-right">Collections (In)</th>
+                                <th class="py-3 px-4 text-right">Disbursements (Out)</th>
+                                <th class="py-3 px-4 text-right font-black">Net Position (Holding)</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            @foreach($bankBreakdown as $bInfo)
+                            <tr class="hover:bg-slate-50 transition-colors">
+                                <td class="py-3 px-4 font-black text-slate-900 flex items-center gap-2">
+                                    <span class="w-2 h-2 rounded-full {{ $bInfo['net_flow'] > 0 ? 'bg-emerald-500' : 'bg-indigo-500' }}"></span>
+                                    <span>{{ $bInfo['bank_name'] }}</span>
+                                </td>
+                                <td class="py-3 px-4">
+                                    <span class="font-bold text-slate-800">{{ $bInfo['account_title'] }}</span>
+                                    @if(!empty($bInfo['account_no']) && $bInfo['account_no'] !== 'N/A')
+                                        <span class="text-slate-500 font-mono text-[11px] ml-1">({{ $bInfo['account_no'] }})</span>
+                                    @endif
+                                </td>
+                                <td class="py-3 px-4 text-right font-bold text-emerald-700">
+                                    Rs. {{ number_format($bInfo['total_received'], 2) }}
+                                </td>
+                                <td class="py-3 px-4 text-right font-bold text-rose-700">
+                                    Rs. {{ number_format($bInfo['total_paid'], 2) }}
+                                </td>
+                                <td class="py-3 px-4 text-right font-black {{ $bInfo['net_flow'] >= 0 ? 'text-indigo-950' : 'text-rose-700' }}">
+                                    {{ $bInfo['net_flow'] >= 0 ? '+' : '' }}Rs. {{ number_format($bInfo['net_flow'], 2) }}
+                                </td>
+                            </tr>
+                            @endforeach
+                        </tbody>
+                        <tfoot class="bg-indigo-50/60 border-t-2 border-indigo-200 font-black text-xs">
+                            <tr>
+                                <td colspan="2" class="py-3.5 px-4 text-slate-900 uppercase tracking-wider">
+                                    Total Consolidated Digital Vault:
+                                </td>
+                                <td class="py-3.5 px-4 text-right text-emerald-700">
+                                    Rs. {{ number_format($totalBankReceived, 2) }}
+                                </td>
+                                <td class="py-3.5 px-4 text-right text-rose-700">
+                                    Rs. {{ number_format($totalBankPaid, 2) }}
+                                </td>
+                                <td class="py-3.5 px-4 text-right font-black text-indigo-950">
+                                    {{ $netBankFlow >= 0 ? '+' : '' }}Rs. {{ number_format($netBankFlow, 2) }}
+                                </td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Digital Settlement Summary -->
             <div class="p-6 rounded-3xl bg-gradient-to-r from-indigo-50 via-slate-50 to-indigo-50 border border-indigo-200/80 space-y-4">
                 <div class="font-black text-xs text-indigo-950 uppercase tracking-wider">Digital Bank Settlement Summary</div>
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div class="p-4 bg-white rounded-2xl border border-indigo-100 shadow-xs">
-                        <div class="text-[10px] text-slate-500 uppercase font-black tracking-wider">Digital Opening</div>
+                        <div class="text-[10px] text-slate-500 uppercase font-black tracking-wider">Digital Opening Float</div>
                         <div class="text-lg font-black text-indigo-950 mt-1">Rs. {{ number_format($openingBank, 2) }}</div>
                     </div>
                     <div class="p-4 bg-white rounded-2xl border border-indigo-100 shadow-xs">
-                        <div class="text-[10px] text-slate-500 uppercase font-black tracking-wider">Digital Collections (In)</div>
+                        <div class="text-[10px] text-slate-500 uppercase font-black tracking-wider">Total Digital Collections (In)</div>
                         <div class="text-lg font-black text-emerald-700 mt-1">Rs. {{ number_format($totalBankReceived, 2) }}</div>
                     </div>
                     <div class="p-4 bg-white rounded-2xl border border-indigo-100 shadow-xs">
-                        <div class="text-[10px] text-slate-500 uppercase font-black tracking-wider">Expected Bank Closing</div>
+                        <div class="text-[10px] text-slate-500 uppercase font-black tracking-wider">Expected Bank Closing (Holding)</div>
                         <div class="text-lg font-black text-indigo-900 mt-1">Rs. {{ number_format($closingBankExpected, 2) }}</div>
                     </div>
                 </div>
@@ -1350,9 +1490,51 @@
             </table>
         </div>
 
+        <!-- Bank Accounts & Digital Holdings Breakdown (PRINT ONLY) -->
+        <div class="space-y-2 pt-2">
+            <h2 class="text-xs font-black uppercase tracking-wider border-b border-black pb-1">II. Bank Accounts & Digital Holdings Breakdown</h2>
+            <table class="w-full text-xs border-collapse border border-black">
+                <thead>
+                    <tr class="bg-slate-200">
+                        <th class="border border-black p-2 text-left">Bank / Financial Institution</th>
+                        <th class="border border-black p-2 text-left">Account Title & Number</th>
+                        <th class="border border-black p-2 text-right">Collections In (PKR)</th>
+                        <th class="border border-black p-2 text-right">Disbursements Out (PKR)</th>
+                        <th class="border border-black p-2 text-right font-black">Net Closing Position (PKR)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @forelse($bankBreakdown ?? [] as $bInfo)
+                    <tr>
+                        <td class="border border-black p-2 font-bold">{{ $bInfo['bank_name'] }}</td>
+                        <td class="border border-black p-2">
+                            {{ $bInfo['account_title'] }}
+                            @if(!empty($bInfo['account_no']) && $bInfo['account_no'] !== 'N/A')
+                                <span class="font-mono text-[10px]">({{ $bInfo['account_no'] }})</span>
+                            @endif
+                        </td>
+                        <td class="border border-black p-2 text-right">{{ number_format($bInfo['total_received'], 2) }}</td>
+                        <td class="border border-black p-2 text-right">{{ number_format($bInfo['total_paid'], 2) }}</td>
+                        <td class="border border-black p-2 text-right font-bold">{{ ($bInfo['net_flow'] >= 0 ? '+' : '') . number_format($bInfo['net_flow'], 2) }}</td>
+                    </tr>
+                    @empty
+                    <tr>
+                        <td colspan="5" class="border border-black p-2 text-center text-slate-500">No active bank accounts configured.</td>
+                    </tr>
+                    @endforelse
+                    <tr class="bg-slate-200 font-black">
+                        <td colspan="2" class="border border-black p-2 uppercase">Total Bank & Digital Vault</td>
+                        <td class="border border-black p-2 text-right">{{ number_format($totalBankReceived, 2) }}</td>
+                        <td class="border border-black p-2 text-right">{{ number_format($totalBankPaid, 2) }}</td>
+                        <td class="border border-black p-2 text-right font-black">{{ ($netBankFlow >= 0 ? '+' : '') . number_format($netBankFlow, 2) }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
         <!-- Physical Reconciliation Block -->
         <div class="space-y-2 pt-2">
-            <h2 class="text-xs font-black uppercase tracking-wider border-b border-black pb-1">II. Physical Drawer Count & Discrepancy Verification</h2>
+            <h2 class="text-xs font-black uppercase tracking-wider border-b border-black pb-1">III. Physical Drawer Count & Discrepancy Verification</h2>
             <div class="grid grid-cols-3 gap-4 border border-black p-3 text-xs">
                 <div>
                     <span class="font-bold">Expected Drawer Cash:</span>
