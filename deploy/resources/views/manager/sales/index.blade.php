@@ -77,10 +77,24 @@ function posSaleTerminal() {
     // Backend Data Lists
     customersList: @json($customers),
     productsList: @json($products),
+    mainCategoriesList: @json($mainCategories ?? []),
     productCategoriesList: @json($productCategories ?? []),
     storesList: @json($stores),
     salesList: @json($sales->items()),
+    bankAccountsList: @json($bankAccounts ?? []),
+    bankAccountId: '{{ $bankAccounts->first()->bankid ?? '' }}',
+    selectedMainCategoryId: '{{ $mainCategoryId ?? ($mainCategories->first()->id ?? '') }}',
     selectedStoreId: '{{ $defaultStore->id ?? ($stores->first()->id ?? '') }}',
+
+    getSelectedBankAccount() {
+        if (!this.bankAccountId) return null;
+        return (this.bankAccountsList || []).find(b => b.bankid == this.bankAccountId) || null;
+    },
+
+    getFilteredSubCategories() {
+        if (!this.selectedMainCategoryId) return this.productCategoriesList || [];
+        return (this.productCategoriesList || []).filter(c => c.product_main_category_id == this.selectedMainCategoryId);
+    },
 
     isIssueStockStore() {
         const store = (this.storesList || []).find(s => s.id == this.selectedStoreId);
@@ -92,18 +106,22 @@ function posSaleTerminal() {
 
     getProductStoreStock(prod) {
         if (!prod) return 0;
-        if (prod.store_stocks && Array.isArray(prod.store_stocks)) {
-            const found = prod.store_stocks.find(s => s.store_id == this.selectedStoreId);
-            if (found) return parseInt(found.stock) || 0;
-        }
         return parseInt(prod.stock) || 0;
+    },
+
+    onMainCategoryChange() {
+        this.activeCategoryId = null;
+        this.recalculateDiscount();
+        this.recalculateTotals();
     },
 
     onStoreChange() {
         const isIssue = this.isIssueStockStore();
         this.items.forEach(it => {
-            it.stock = this.getProductStoreStock(it.product_obj);
-            it.price = this.getProductSalePrice(it.product_obj);
+            if (it.product_obj) {
+                it.stock = this.getProductStoreStock(it.product_obj);
+                it.price = this.getProductSalePrice(it.product_obj);
+            }
         });
         if (isIssue) {
             this.billDiscount = 0;
@@ -137,8 +155,13 @@ function posSaleTerminal() {
     previouslyPaidAmount: 0,
     additionalPayment: 0,
 
-    // Cart Items: [{ product_id, product_obj, title, price, quantity, stock }]
+    // Cart Items: [{ product_id, product_obj, title, price, quantity, stock, is_addon, custom_title }]
     items: [],
+
+    // Quick Add-On Fields State
+    newAddonTitle: '',
+    newAddonPrice: '',
+    newAddonQty: 1,
     
     // User & Discount Permission State
     isAdminUser: {{ auth()->user()->hasRole('admin') ? 'true' : 'false' }},
@@ -168,6 +191,9 @@ function posSaleTerminal() {
     // 80mm Thermal Receipt State
     receiptModalOpen: false,
     receiptData: null,
+
+    // Submission Guard State
+    isSubmitting: false,
 
     init() {
         this.recalculateTotals();
@@ -229,13 +255,16 @@ function posSaleTerminal() {
         return '/' + img.replace(/^\/+/, '');
     },
     getFilteredProducts() {
-        let list = this.productsList;
+        let list = this.productsList || [];
+        if (this.selectedMainCategoryId) {
+            list = list.filter(p => p.product_main_category_id == this.selectedMainCategoryId);
+        }
         if (this.activeCategoryId) {
             list = list.filter(p => p.product_category_id == this.activeCategoryId);
         }
         if (this.productSearchQuery && this.productSearchQuery.trim() !== '') {
             const q = this.productSearchQuery.toLowerCase();
-            list = list.filter(p => p.title.toLowerCase().includes(q));
+            list = list.filter(p => (p.title && p.title.toLowerCase().includes(q)) || (p.code && p.code.toLowerCase().includes(q)));
         }
         return list;
     },
@@ -309,6 +338,66 @@ function posSaleTerminal() {
     removeItem(index) {
         this.items.splice(index, 1);
         this.recalculateDiscount();
+    },
+
+    // Add-On Helpers & Custom Line Items
+    isAddOn(item) {
+        return !!(item && (item.is_addon === true || item.is_addon === 1 || !item.product_id));
+    },
+    addCustomAddon(presetTitle = null, presetPrice = null) {
+        const title = (presetTitle !== null ? presetTitle : (this.newAddonTitle || '')).trim();
+        const rawPrice = (presetPrice !== null ? presetPrice : this.newAddonPrice);
+        const price = Math.max(0, parseFloat(rawPrice) || 0);
+        const qty = Math.max(1, parseInt(this.newAddonQty) || 1);
+
+        if (!title && price <= 0) {
+            alert('Please enter an Add-On name or price.');
+            return;
+        }
+
+        const finalTitle = title || 'Custom Add-On';
+
+        this.items.push({
+            product_id: null,
+            product_obj: null,
+            title: finalTitle,
+            custom_title: finalTitle,
+            is_addon: true,
+            quantity: qty,
+            price: price,
+            stock: 9999,
+            discount: 0,
+            discount_type: 'fixed'
+        });
+
+        // Reset inputs
+        this.newAddonTitle = '';
+        this.newAddonPrice = '';
+        this.newAddonQty = 1;
+
+        this.recalculateDiscount();
+        this.recalculateTotals();
+    },
+    incrementCartItem(item, index) {
+        if (!item) return;
+        item.quantity = (parseInt(item.quantity) || 0) + 1;
+        this.recalculateDiscount();
+    },
+    decrementCartItem(item, index) {
+        if (!item) return;
+        const currentQty = parseInt(item.quantity) || 1;
+        if (currentQty > 1) {
+            item.quantity = currentQty - 1;
+        } else {
+            this.removeItem(index);
+        }
+        this.recalculateDiscount();
+    },
+    getAddOnsCount() {
+        return this.items.filter(it => this.isAddOn(it)).length;
+    },
+    getAddOnsTotal() {
+        return this.items.filter(it => this.isAddOn(it)).reduce((sum, it) => sum + this.getItemLineSubtotal(it), 0);
     },
 
     // Single Product Discount Helpers
@@ -499,6 +588,7 @@ function posSaleTerminal() {
             discountPercentage: this.discountPercentage,
             billDiscount: this.billDiscount,
             paymentMode: this.paymentMode,
+            bankAccountId: this.bankAccountId,
             splitPayments: JSON.parse(JSON.stringify(this.splitPayments)),
             extraAmount: this.extraAmount,
             receivedAmount: this.receivedAmount,
@@ -527,6 +617,7 @@ function posSaleTerminal() {
         this.discountPercentage = record.discountPercentage || 0;
         this.billDiscount = record.billDiscount || 0;
         this.paymentMode = record.paymentMode || 'Cash';
+        this.bankAccountId = record.bankAccountId || (this.bankAccountsList.length > 0 ? String(this.bankAccountsList[0].bankid) : '');
         this.splitPayments = record.splitPayments ? JSON.parse(JSON.stringify(record.splitPayments)) : { Cash: 0, Card: 0, Bank: 0, Other: 0 };
         this.extraAmount = record.extraAmount || 0;
         this.receivedAmount = record.receivedAmount || 0;
@@ -572,6 +663,7 @@ function posSaleTerminal() {
         this.selectedCustomerObj = sale.customer || this.customersList.find(c => c.id == sale.account_id) || null;
         this.notes = sale.notes || '';
         this.paymentMode = sale.payment_mode || 'Cash';
+        this.bankAccountId = sale.bank_account_id ? String(sale.bank_account_id) : (this.bankAccountsList.length > 0 ? String(this.bankAccountsList[0].bankid) : '');
         if (sale.payment_mode === 'Split' && sale.split_payments) {
             const sp = (typeof sale.split_payments === 'string') ? JSON.parse(sale.split_payments) : sale.split_payments;
             this.splitPayments = {
@@ -599,17 +691,35 @@ function posSaleTerminal() {
         this.items = [];
         if (sale.items && sale.items.length > 0) {
             sale.items.forEach(it => {
-                const prod = this.productsList.find(p => p.id == it.product_id) || it.product || { id: it.product_id, title: it.product ? it.product.title : 'Product' };
-                this.items.push({
-                    product_id: it.product_id,
-                    product_obj: prod,
-                    title: prod.title || (it.product ? it.product.title : 'Product'),
-                    quantity: parseInt(it.quantity) || 1,
-                    price: this.isIssueStockStore() ? 0 : (parseFloat(it.unit_price) || this.getProductSalePrice(prod)),
-                    stock: this.getProductStoreStock(prod),
-                    discount: parseFloat(it.discount) || 0,
-                    discount_type: it.discount_type || 'fixed'
-                });
+                const isItemAddon = it.is_addon || !it.product_id;
+                if (isItemAddon) {
+                    this.items.push({
+                        product_id: null,
+                        product_obj: null,
+                        title: it.custom_title || 'Add-on',
+                        custom_title: it.custom_title || 'Add-on',
+                        is_addon: true,
+                        quantity: parseInt(it.quantity) || 1,
+                        price: parseFloat(it.unit_price) || 0,
+                        stock: 9999,
+                        discount: parseFloat(it.discount) || 0,
+                        discount_type: it.discount_type || 'fixed'
+                    });
+                } else {
+                    const prod = this.productsList.find(p => p.id == it.product_id) || it.product || { id: it.product_id, title: it.product ? it.product.title : 'Product' };
+                    this.items.push({
+                        product_id: it.product_id,
+                        product_obj: prod,
+                        title: prod.title || (it.product ? it.product.title : 'Product'),
+                        custom_title: null,
+                        is_addon: false,
+                        quantity: parseInt(it.quantity) || 1,
+                        price: this.isIssueStockStore() ? 0 : (parseFloat(it.unit_price) || this.getProductSalePrice(prod)),
+                        stock: this.getProductStoreStock(prod),
+                        discount: parseFloat(it.discount) || 0,
+                        discount_type: it.discount_type || 'fixed'
+                    });
+                }
             });
         }
 
@@ -635,6 +745,9 @@ function posSaleTerminal() {
         this.invoiceNo = 'INV-{{ date('Ym') }}-{{ str_pad(\App\Models\Sale::count() + 1, 4, '0', STR_PAD_LEFT) }}';
         this.saleDate = '{{ date('Y-m-d') }}';
         this.items = [];
+        this.newAddonTitle = '';
+        this.newAddonPrice = '';
+        this.newAddonQty = 1;
         this.notes = '';
         this.discountPercentage = 0;
         this.billDiscount = 0;
@@ -642,6 +755,7 @@ function posSaleTerminal() {
         this.extraPercentage = 0;
         this.extraAmount = 0;
         this.paymentMode = 'Cash';
+        this.bankAccountId = this.bankAccountsList.length > 0 ? String(this.bankAccountsList[0].bankid) : '';
         this.splitPayments = { Cash: 0, Card: 0, Bank: 0, Other: 0 };
         this.selectedCustomerId = '{{ $defaultCustomer->id ?? ($customers->first()->id ?? '') }}';
         this.selectedCustomerObj = @json($defaultCustomer ?? ($customers->first() ?? null));
@@ -656,14 +770,15 @@ function posSaleTerminal() {
             const isSaleIssue = storeObj && (((storeObj.name || '').toUpperCase().trim() === 'ISSUE STOCK') || ((storeObj.code || '').toUpperCase().trim() === 'ISSUE STOCK'));
 
             const receiptItems = (sale.items || []).map(it => {
-                const prod = (it.product) || (this.productsList ? this.productsList.find(p => p.id == it.product_id) : null);
+                const isItemAddon = it.is_addon || !it.product_id;
+                const prod = isItemAddon ? null : ((it.product) || (this.productsList ? this.productsList.find(p => p.id == it.product_id) : null));
                 const qty = parseInt(it.quantity) || 1;
                 const unitPrice = isSaleIssue ? 0 : (parseFloat(it.unit_price) || 0);
                 const origPrice = isSaleIssue ? 0 : (prod ? (parseFloat(prod.price) || unitPrice) : unitPrice);
                 const discAmt = isSaleIssue ? 0 : (Math.max(0, origPrice - unitPrice) * qty);
                 const subtotal = isSaleIssue ? 0 : ((it.subtotal && parseFloat(it.subtotal) > 0) ? parseFloat(it.subtotal) : (unitPrice * qty));
                 return {
-                    title: prod ? prod.title : (it.title || 'Product'),
+                    title: isItemAddon ? (it.custom_title || 'Add-on') : (prod ? prod.title : (it.title || 'Product')),
                     quantity: qty,
                     price: origPrice > 0 ? origPrice : unitPrice,
                     unitPrice: unitPrice,
@@ -716,6 +831,7 @@ function posSaleTerminal() {
             }
 
             const custObj = sale.customer || (this.customersList ? this.customersList.find(c => c.id == sale.account_id) : null);
+            const bankObj = sale.bank_account || (sale.bank_account_id ? ((this.bankAccountsList || []).find(b => b.bankid == sale.bank_account_id)) : null);
 
             return {
                 billNo: sale.invoice_no || ('#' + sale.id),
@@ -737,6 +853,9 @@ function posSaleTerminal() {
                 balanceDue: due,
                 changeReturn: change,
                 paymentMode: sale.payment_mode || 'Cash',
+                bankAccountName: bankObj ? bankObj.bank_name : '',
+                bankAccountNo: bankObj ? bankObj.account_no : '',
+                bankAccountTitle: bankObj ? bankObj.account_title : '',
                 splitPayments: sale.split_payments ? (typeof sale.split_payments === 'string' ? JSON.parse(sale.split_payments) : sale.split_payments) : null,
                 notes: sale.notes || '',
                 generatedBy: '{{ addslashes(auth()->user()->name ?? 'Staff') }}'
@@ -756,7 +875,7 @@ function posSaleTerminal() {
                 const netPrice = isCartIssue ? 0 : Math.max(0, unitPrice - unitDisc);
                 const lineSubtotal = isCartIssue ? 0 : (netPrice * qty);
                 return {
-                    title: it.title || (it.product_obj ? it.product_obj.title : 'Product'),
+                    title: it.custom_title || it.title || (it.product_obj ? it.product_obj.title : 'Product'),
                     quantity: qty,
                     price: unitPrice,
                     unitPrice: netPrice,
@@ -790,13 +909,15 @@ function posSaleTerminal() {
                 });
             }
 
+            const mainCatObj = (this.mainCategoriesList || []).find(m => m.id == this.selectedMainCategoryId);
             const storeObj = this.storesList ? this.storesList.find(s => s.id == this.selectedStoreId) : null;
+            const currentBank = (this.paymentMode === 'Bank' || (this.paymentMode === 'Split' && (this.splitPayments.Bank || 0) > 0)) ? this.getSelectedBankAccount() : null;
 
             return {
                 billNo: this.editingSaleId ? ('#EDIT-' + this.editingSaleId) : this.invoiceNo,
                 billDate: this.saleDate,
                 billTime: '{{ date('h:i A') }}',
-                storeName: storeObj ? storeObj.name : '{{ $defaultStore->name ?? 'Main Store' }}',
+                storeName: mainCatObj ? mainCatObj.title : (storeObj ? storeObj.name : '{{ $defaultStore->name ?? 'Main Store' }}'),
                 customerName: this.selectedCustomerObj ? this.selectedCustomerObj.name : 'Walk-in Client',
                 customerPhone: this.selectedCustomerObj ? (this.selectedCustomerObj.phone_no1 || '') : '',
                 items: cartItems,
@@ -812,6 +933,9 @@ function posSaleTerminal() {
                 balanceDue: this.getRemainingBalance(),
                 changeReturn: this.getChangeReturn(),
                 paymentMode: this.paymentMode,
+                bankAccountName: currentBank ? currentBank.bank_name : '',
+                bankAccountNo: currentBank ? currentBank.account_no : '',
+                bankAccountTitle: currentBank ? currentBank.account_title : '',
                 splitPayments: this.paymentMode === 'Split' ? JSON.parse(JSON.stringify(this.splitPayments)) : null,
                 notes: this.notes,
                 generatedBy: '{{ addslashes(auth()->user()->name ?? 'Staff') }}'
@@ -912,6 +1036,8 @@ function posSaleTerminal() {
 
     // Submission
     submitForm(isPrint = false) {
+        if (this.isSubmitting) return;
+
         if (this.items.length === 0) {
             alert('Please select at least one product to sell.');
             return;
@@ -949,9 +1075,16 @@ function posSaleTerminal() {
         }
 
         const form = document.getElementById('posSaleForm');
+        if (!form) return;
+
+        this.isSubmitting = true;
+
         if (isPrint) {
             const data = this.generateReceiptData();
-            if (!data) return;
+            if (!data) {
+                this.isSubmitting = false;
+                return;
+            }
             this.receiptData = data;
             this.printReceiptHtml(data, () => {
                 form.submit();
@@ -1009,20 +1142,23 @@ function posSaleTerminal() {
     <!-- TAB 1: 3-COLUMN POS BILLING TERMINAL (MATCHING APPOINTMENTS LAYOUT) -->
     <div x-show="activeTab === 'pos'" class="space-y-5">
         
-        <form id="posSaleForm" method="POST" :action="editingSaleId ? ('{{ url('manager/sales') }}/' + editingSaleId) : '{{ route('manager.sales.store') }}'">
+        <form id="posSaleForm" method="POST" :action="editingSaleId ? ('{{ url('manager/sales') }}/' + editingSaleId) : '{{ route('manager.sales.store') }}'" @submit="if(isSubmitting) { $event.preventDefault(); return false; } isSubmitting = true;">
             @csrf
+            <input type="hidden" name="form_submission_token" value="{{ (string) \Illuminate\Support\Str::uuid() }}">
             <template x-if="editingSaleId">
                 <input type="hidden" name="_method" value="PUT">
             </template>
 
             <!-- Hidden Form Payloads -->
             <input type="hidden" name="account_id" :value="selectedCustomerId">
+            <input type="hidden" name="product_main_category_id" :value="selectedMainCategoryId">
             <input type="hidden" name="store_id" :value="selectedStoreId">
             <input type="hidden" name="sale_date" :value="saleDate">
             <input type="hidden" name="discount" :value="getCalculatedDiscount()">
             <input type="hidden" name="received_amount" :value="editingSaleId ? getTotalPaidAmount() : (receivedAmount || 0)">
             <input type="hidden" name="additional_payment" :value="editingSaleId ? (additionalPayment || 0) : 0">
             <input type="hidden" name="payment_mode" :value="paymentMode">
+            <input type="hidden" name="bank_account_id" :value="(paymentMode === 'Bank' || (paymentMode === 'Split' && (splitPayments.Bank || 0) > 0)) ? bankAccountId : ''">
             <input type="hidden" name="split_payments" :value="paymentMode === 'Split' ? JSON.stringify(splitPayments) : ''">
             <input type="hidden" name="extra_amount" :value="getExtraFee()">
             <input type="hidden" name="notes" :value="notes">
@@ -1031,7 +1167,9 @@ function posSaleTerminal() {
             <!-- Itemized Products Array -->
             <template x-for="(item, idx) in items" :key="idx">
                 <div>
-                    <input type="hidden" :name="'items['+idx+'][product_id]'" :value="item.product_id">
+                    <input type="hidden" :name="'items['+idx+'][product_id]'" :value="item.product_id || ''">
+                    <input type="hidden" :name="'items['+idx+'][custom_title]'" :value="item.custom_title || item.title || ''">
+                    <input type="hidden" :name="'items['+idx+'][is_addon]'" :value="isAddOn(item) ? '1' : '0'">
                     <input type="hidden" :name="'items['+idx+'][quantity]'" :value="item.quantity">
                     <input type="hidden" :name="'items['+idx+'][unit_price]'" :value="item.price">
                     <input type="hidden" :name="'items['+idx+'][discount]'" :value="item.discount || 0">
@@ -1039,36 +1177,30 @@ function posSaleTerminal() {
                 </div>
             </template>
 
-            <!-- ACTIVE SELLING STORE / BRANCH PICKER BANNER -->
+            <!-- ACTIVE SELLING MAIN CATEGORY PICKER BANNER -->
             <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-slate-700 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-white mb-5">
                 <div class="flex items-center gap-3">
                     <div class="w-10 h-10 bg-indigo-600/30 border border-indigo-400/30 flex items-center justify-center text-xl shrink-0">
-                        🏬
+                        🛍️
                     </div>
                     <div>
-                        <span class="text-[10px] font-black uppercase tracking-wider text-indigo-300">Active Selling Store / Branch (Stock Out Source)</span>
+                        <span class="text-[10px] font-black uppercase tracking-wider text-indigo-300">Active Selling Main Category</span>
                         <div class="flex items-center gap-2 mt-0.5">
-                            <h2 class="text-sm font-black text-white" x-text="(storesList.find(s => s.id == selectedStoreId) || {}).name || 'Select Store'"></h2>
-                            <span class="px-1.5 py-0.2 bg-indigo-500/30 text-indigo-200 font-mono font-bold text-[10px] border border-indigo-400/30" 
-                                  x-text="'[' + ((storesList.find(s => s.id == selectedStoreId) || {}).code || '') + ']'"></span>
-                            <template x-if="(storesList.find(s => s.id == selectedStoreId) || {}).is_default">
-                                <span class="px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 text-[9px] font-extrabold border border-emerald-500/30">DEFAULT</span>
-                            </template>
-                            <template x-if="isIssueStockStore()">
-                                <span class="px-2 py-0.5 bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-sm">
-                                    ⚡ ISSUE STOCK: Zero Price & Rate (PKR 0) &bull; Zero Discount &bull; Direct Stock Out
-                                </span>
-                            </template>
+                            <h2 class="text-sm font-black text-white" x-text="(mainCategoriesList.find(m => m.id == selectedMainCategoryId) || {}).title || 'Select Main Category'"></h2>
+                            <span class="px-2 py-0.5 bg-indigo-500/30 text-indigo-200 font-mono font-bold text-[10px] border border-indigo-400/30" 
+                                  x-text="(getFilteredSubCategories().length) + ' Sub-Categories'"></span>
+                            <span class="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 text-[9px] font-extrabold border border-emerald-500/30"
+                                  x-text="(getFilteredProducts().length) + ' Products'"></span>
                         </div>
                     </div>
                 </div>
 
                 <div class="flex items-center gap-2.5">
-                    <label class="text-xs font-bold text-slate-300 whitespace-nowrap">Selling From Branch:</label>
-                    <select x-model="selectedStoreId" @change="onStoreChange()" 
+                    <label class="text-xs font-bold text-slate-300 whitespace-nowrap">Selling Main Category:</label>
+                    <select x-model="selectedMainCategoryId" @change="onMainCategoryChange()" 
                             class="px-3 py-2 bg-white text-slate-900 text-xs font-black border border-slate-300 focus:ring-2 focus:ring-indigo-500 shadow-xs cursor-pointer">
-                        <template x-for="s in storesList" :key="s.id">
-                            <option :value="s.id" x-text="'🏬 ' + s.name + (s.is_default ? ' (Default)' : '')"></option>
+                        <template x-for="m in mainCategoriesList" :key="m.id">
+                            <option :value="m.id" x-text="'📁 ' + m.title"></option>
                         </template>
                     </select>
                 </div>
@@ -1168,16 +1300,16 @@ function posSaleTerminal() {
                                        class="w-full px-3 py-2 bg-white border border-slate-300 rounded-none text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500">
                             </div>
 
-                            <!-- Selling Store / Branch Selector -->
+                            <!-- Selling Main Category Selector -->
                             <div>
-                                <label class="block text-[11px] font-bold text-slate-700 mb-1">Selling Store / Branch <span class="text-rose-600">*</span></label>
-                                <select x-model="selectedStoreId" 
+                                <label class="block text-[11px] font-bold text-slate-700 mb-1">Selling Main Category <span class="text-rose-600">*</span></label>
+                                <select x-model="selectedMainCategoryId" @change="onMainCategoryChange()" 
                                         class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-none text-xs font-bold text-slate-800 focus:bg-white focus:ring-2 focus:ring-indigo-500">
-                                    <template x-for="s in storesList" :key="s.id">
-                                        <option :value="s.id" x-text="'🏬 ' + s.name + (s.is_default ? ' (Default)' : '')"></option>
+                                    <template x-for="m in mainCategoriesList" :key="m.id">
+                                        <option :value="m.id" x-text="'📁 ' + m.title"></option>
                                     </template>
                                 </select>
-                                <span class="text-[9px] text-slate-400 font-medium">Stock is checked & decremented from this location</span>
+                                <span class="text-[9px] text-slate-400 font-medium">Sub-categories & catalog are filtered to this category</span>
                             </div>
 
                             <!-- Notes / Remarks -->
@@ -1211,16 +1343,16 @@ function posSaleTerminal() {
                                class="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-none text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-indigo-500">
                     </div>
 
-                    <!-- Category Pills Filter -->
-                    <template x-if="productCategoriesList && productCategoriesList.length > 0">
+                    <!-- Sub-Category Pills Filter (Dynamic for Selected Main Category) -->
+                    <template x-if="getFilteredSubCategories().length > 0">
                         <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
                             <button type="button" 
                                     @click="activeCategoryId = null"
                                     :class="activeCategoryId === null ? 'bg-slate-900 text-white font-extrabold shadow-xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold'"
                                     class="px-3 py-1.5 rounded-none whitespace-nowrap text-[11px] transition-all cursor-pointer">
-                                All Products
+                                All Sub-Categories
                             </button>
-                            <template x-for="cat in productCategoriesList" :key="cat.id">
+                            <template x-for="cat in getFilteredSubCategories()" :key="cat.id">
                                 <button type="button" 
                                         @click="activeCategoryId = (activeCategoryId === cat.id ? null : cat.id)"
                                         :class="activeCategoryId === cat.id ? 'bg-indigo-600 text-white font-extrabold shadow-xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold'"
@@ -1335,8 +1467,113 @@ function posSaleTerminal() {
                             <span class="w-5 h-5 bg-indigo-600 text-white rounded-none text-xs font-black flex items-center justify-center">4</span>
                             <h3 class="text-xs font-black text-slate-900 uppercase tracking-wider">Bill & Clearance Summary</h3>
                         </div>
-                        <span class="text-[11px] font-black text-indigo-700 bg-indigo-50 px-2 py-0.5 border border-indigo-200" 
-                              x-text="items.length + ' Product(s)'"></span>
+                        <div class="flex items-center gap-1.5">
+                            <template x-if="getAddOnsCount() > 0">
+                                <span class="text-[10px] font-black text-amber-800 bg-amber-100 px-1.5 py-0.5 border border-amber-300"
+                                      x-text="getAddOnsCount() + ' Add-on(s)'"></span>
+                            </template>
+                            <span class="text-[11px] font-black text-indigo-700 bg-indigo-50 px-2 py-0.5 border border-indigo-200" 
+                                  x-text="items.length + ' Item(s)'"></span>
+                        </div>
+                    </div>
+
+                    <!-- QUICK ADD-ONS / CUSTOM ITEMS CARD -->
+                    <div class="p-3 bg-amber-50/50 border border-amber-200/90 rounded-none space-y-2.5 shadow-2xs">
+                        <div class="flex items-center justify-between flex-wrap gap-2">
+                            <div class="flex items-center gap-1.5">
+                                <span class="w-5 h-5 bg-amber-600 text-white rounded-none text-xs font-black flex items-center justify-center shadow-2xs">
+                                    +
+                                </span>
+                                <h4 class="text-xs font-black text-slate-900 uppercase tracking-wider">Quick Add-Ons / Custom Items</h4>
+                                <span class="px-1.5 py-0.2 text-[9px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-300">Multiple Allowed</span>
+                            </div>
+                            <template x-if="getAddOnsCount() > 0">
+                                <span class="inline-flex items-center gap-1.5 text-[10px] font-black text-amber-900 bg-amber-200/80 px-2 py-0.5 border border-amber-300">
+                                    <span x-text="getAddOnsCount() + ' in bill'"></span>
+                                    <span>&bull;</span>
+                                    <span x-text="'PKR ' + getAddOnsTotal().toLocaleString()"></span>
+                                </span>
+                            </template>
+                        </div>
+
+                        <!-- Quick Preset Suggestions -->
+                        <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
+                            <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Quick:</span>
+                            <button type="button" @click="newAddonTitle = 'Empty Bottle (100ml)'; if(!newAddonPrice) newAddonPrice = 50;" 
+                                    class="px-2 py-0.5 text-[10px] font-bold bg-white hover:bg-amber-100 text-slate-700 hover:text-amber-900 border border-slate-200 hover:border-amber-300 transition-colors cursor-pointer">
+                                🧴 Empty Bottle 100ml
+                            </button>
+                            <button type="button" @click="newAddonTitle = 'Empty Bottle (200ml)'; if(!newAddonPrice) newAddonPrice = 80;" 
+                                    class="px-2 py-0.5 text-[10px] font-bold bg-white hover:bg-amber-100 text-slate-700 hover:text-amber-900 border border-slate-200 hover:border-amber-300 transition-colors cursor-pointer">
+                                🧴 Empty Bottle 200ml
+                            </button>
+                            <button type="button" @click="newAddonTitle = 'Spray Pump / Cap'; if(!newAddonPrice) newAddonPrice = 40;" 
+                                    class="px-2 py-0.5 text-[10px] font-bold bg-white hover:bg-amber-100 text-slate-700 hover:text-amber-900 border border-slate-200 hover:border-amber-300 transition-colors cursor-pointer">
+                                💨 Spray Pump
+                            </button>
+                            <button type="button" @click="newAddonTitle = 'Jar / Container'; if(!newAddonPrice) newAddonPrice = 60;" 
+                                    class="px-2 py-0.5 text-[10px] font-bold bg-white hover:bg-amber-100 text-slate-700 hover:text-amber-900 border border-slate-200 hover:border-amber-300 transition-colors cursor-pointer">
+                                🫙 Jar / Container
+                            </button>
+                        </div>
+
+                        <!-- Inputs: Title Row & Price/Qty/Add Row -->
+                        <div class="space-y-2">
+                            <!-- Title Input -->
+                            <div class="relative w-full">
+                                <input type="text" 
+                                       x-model="newAddonTitle" 
+                                       @keydown.enter.prevent="addCustomAddon()"
+                                       placeholder="Enter add-on name (e.g. Empty Bottle with Oil, Spray Pump, Container)..."
+                                       class="w-full h-9 px-3 bg-white border border-slate-300 focus:border-amber-600 focus:ring-1 focus:ring-amber-500 text-xs font-bold text-slate-900 placeholder:text-slate-400 rounded-none shadow-2xs transition-colors">
+                            </div>
+
+                            <!-- Row: Price + Quantity Stepper + Add Button -->
+                            <div class="flex items-center gap-2 w-full">
+                                <!-- Price Input -->
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center h-9 border border-slate-300 bg-white focus-within:border-amber-600 focus-within:ring-1 focus-within:ring-amber-500 shadow-2xs">
+                                        <span class="h-full px-2.5 flex items-center justify-center text-[10px] font-black text-slate-600 bg-slate-100 border-r border-slate-200 select-none shrink-0">PKR</span>
+                                        <input type="number" 
+                                               step="any" 
+                                               min="0" 
+                                               x-model.number="newAddonPrice" 
+                                               @keydown.enter.prevent="addCustomAddon()"
+                                               placeholder="0.00" 
+                                               title="Add-on Price in PKR"
+                                               class="w-full h-full px-2.5 text-right bg-transparent text-xs font-black text-slate-900 border-0 focus:outline-none">
+                                    </div>
+                                </div>
+
+                                <!-- Quantity Stepper -->
+                                <div class="shrink-0">
+                                    <div class="flex items-center h-9 border border-slate-300 bg-white shadow-2xs select-none" title="Quantity">
+                                        <button type="button" 
+                                                @click="newAddonQty = Math.max(1, (parseInt(newAddonQty)||1) - 1)" 
+                                                class="w-7 h-full bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-700 flex items-center justify-center font-black text-sm transition-colors cursor-pointer"
+                                                title="Decrease Quantity">−</button>
+                                        <input type="number" 
+                                               min="1" 
+                                               x-model.number="newAddonQty" 
+                                               @keydown.enter.prevent="addCustomAddon()" 
+                                               class="w-9 h-full text-center text-xs font-black text-slate-900 border-x border-slate-200 focus:outline-none p-0 bg-white"
+                                               title="Quantity">
+                                        <button type="button" 
+                                                @click="newAddonQty = (parseInt(newAddonQty)||1) + 1" 
+                                                class="w-7 h-full bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-700 flex items-center justify-center font-black text-sm transition-colors cursor-pointer"
+                                                title="Increase Quantity">+</button>
+                                    </div>
+                                </div>
+
+                                <!-- Add Button -->
+                                <button type="button" 
+                                        @click="addCustomAddon()"
+                                        class="h-9 px-3.5 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 shrink-0 cursor-pointer">
+                                    <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"></path></svg>
+                                    <span class="whitespace-nowrap">Add to Bill</span>
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- 4.1 Selected Line Items Table (with Sequence #) -->
@@ -1352,7 +1589,7 @@ function posSaleTerminal() {
                                 <thead>
                                     <tr class="bg-slate-50 border-b border-slate-200 text-slate-500 font-extrabold text-[10px] uppercase">
                                         <th class="py-2 px-1 text-center w-7 text-slate-400 font-mono">#</th>
-                                        <th class="py-2 px-2">Product Title</th>
+                                        <th class="py-2 px-2">Item / Add-On</th>
                                         <th x-show="!isIssueStockStore()" class="py-2 px-1 text-right">Price</th>
                                         <th class="py-2 px-1 text-center w-24">Qty</th>
                                         <th x-show="!isIssueStockStore()" class="py-2 px-1 text-center w-28">Discount</th>
@@ -1361,31 +1598,60 @@ function posSaleTerminal() {
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-slate-100 text-[11px] font-bold">
-                                    <template x-for="(item, index) in items" :key="item.product_id">
-                                        <tr class="hover:bg-slate-50/60">
+                                    <template x-for="(item, index) in items" :key="item.product_id ? 'prod_' + item.product_id : 'addon_' + index">
+                                        <tr class="hover:bg-slate-50/60" :class="isAddOn(item) ? 'bg-amber-50/30' : ''">
                                             <td class="py-2 px-1 text-center font-mono font-bold text-slate-400 text-[10px]" x-text="index + 1"></td>
                                             <td class="py-2 px-2 font-bold text-slate-900 leading-tight">
-                                                <div x-text="item.title"></div>
-                                                <template x-if="getItemDiscountAmount(item) > 0">
-                                                    <div class="text-[9px] text-emerald-600 font-black">
-                                                        -PKR <span x-text="getItemDiscountAmount(item).toLocaleString()"></span>/unit off
+                                                <!-- Product Title -->
+                                                <template x-if="!isAddOn(item)">
+                                                    <div>
+                                                        <div x-text="item.title"></div>
+                                                        <template x-if="getItemDiscountAmount(item) > 0">
+                                                            <div class="text-[9px] text-emerald-600 font-black">
+                                                                -PKR <span x-text="getItemDiscountAmount(item).toLocaleString()"></span>/unit off
+                                                            </div>
+                                                        </template>
+                                                    </div>
+                                                </template>
+                                                <!-- Add-on Title with Inline Edit -->
+                                                <template x-if="isAddOn(item)">
+                                                    <div class="space-y-1">
+                                                        <div class="flex items-center gap-1">
+                                                            <span class="px-1.5 py-0.2 text-[9px] font-black bg-amber-100 text-amber-900 border border-amber-300 uppercase">ADD-ON</span>
+                                                        </div>
+                                                        <input type="text" x-model="item.custom_title" @input="item.title = item.custom_title" placeholder="Add-on Name..." 
+                                                               class="w-full px-1.5 py-0.5 bg-amber-50/80 border border-amber-300 focus:border-amber-600 focus:bg-white text-[11px] font-bold text-slate-900 rounded-none focus:outline-none transition-colors">
                                                     </div>
                                                 </template>
                                             </td>
                                             <td x-show="!isIssueStockStore()" class="py-2 px-1 text-right text-slate-600 font-mono whitespace-nowrap">
-                                                <template x-if="getItemDiscountAmount(item) > 0">
+                                                <!-- Product Price Display -->
+                                                <template x-if="!isAddOn(item)">
                                                     <div>
-                                                        <span class="line-through text-slate-400 text-[9px]">PKR <span x-text="parseFloat(item.price).toLocaleString()"></span></span>
-                                                        <div class="text-indigo-600 font-black text-[11px]">PKR <span x-text="getItemNetUnitPrice(item).toLocaleString()"></span></div>
+                                                        <template x-if="getItemDiscountAmount(item) > 0">
+                                                            <div>
+                                                                <span class="line-through text-slate-400 text-[9px]">PKR <span x-text="parseFloat(item.price).toLocaleString()"></span></span>
+                                                                <div class="text-indigo-600 font-black text-[11px]">PKR <span x-text="getItemNetUnitPrice(item).toLocaleString()"></span></div>
+                                                            </div>
+                                                        </template>
+                                                        <template x-if="!getItemDiscountAmount(item) || getItemDiscountAmount(item) === 0">
+                                                            <span>PKR <span x-text="parseFloat(item.price).toLocaleString()"></span></span>
+                                                        </template>
                                                     </div>
                                                 </template>
-                                                <template x-if="!getItemDiscountAmount(item) || getItemDiscountAmount(item) === 0">
-                                                    <span>PKR <span x-text="parseFloat(item.price).toLocaleString()"></span></span>
+                                                <!-- Add-on Editable Price -->
+                                                <template x-if="isAddOn(item)">
+                                                    <div class="flex items-center justify-end">
+                                                        <span class="text-[9px] font-bold text-slate-400 mr-0.5">PKR</span>
+                                                        <input type="number" step="any" min="0" x-model.number="item.price" @input="recalculateDiscount()" 
+                                                               style="width: 52px; height: 22px; text-align: right; font-size: 11px; font-weight: 800; padding: 0 4px;"
+                                                               class="border border-amber-300 bg-white font-mono text-slate-900 focus:outline-none focus:border-amber-600">
+                                                    </div>
                                                 </template>
                                             </td>
                                             <td class="py-2 px-1 text-center">
                                                 <div class="inline-flex items-center border border-slate-300 bg-white shadow-2xs">
-                                                    <button type="button" @click="decrementProduct(item)" 
+                                                    <button type="button" @click="decrementCartItem(item, index)" 
                                                             class="w-5 h-6 flex items-center justify-center bg-slate-100 hover:bg-rose-100 hover:text-rose-700 text-slate-800 font-black text-xs transition-colors cursor-pointer select-none">
                                                         -
                                                     </button>
@@ -1395,13 +1661,13 @@ function posSaleTerminal() {
                                                            @change="item.quantity = Math.max(1, parseInt($event.target.value) || 1); recalculateDiscount()"
                                                            style="width: 28px; height: 24px; text-align: center; font-size: 11px; font-weight: 900; color: #0f172a !important; background-color: #ffffff !important; border-left: 1px solid #cbd5e1; border-right: 1px solid #cbd5e1; border-top: none; border-bottom: none; outline: none; padding: 0;"
                                                            class="text-center font-black text-slate-900 bg-white">
-                                                    <button type="button" @click="incrementProduct(item)" 
+                                                    <button type="button" @click="incrementCartItem(item, index)" 
                                                             class="w-5 h-6 flex items-center justify-center bg-slate-100 hover:bg-indigo-100 hover:text-indigo-700 text-slate-800 font-black text-xs transition-colors cursor-pointer select-none">
                                                         +
                                                     </button>
                                                 </div>
                                             </td>
-                                            <!-- Single Product Discount Column -->
+                                            <!-- Single Product / Add-on Discount Column -->
                                             <td x-show="!isIssueStockStore()" class="py-2 px-1 text-center">
                                                 <div class="inline-flex items-center border border-slate-300 bg-white rounded-none shadow-2xs overflow-hidden">
                                                     <input type="number" step="any" min="0" :placeholder="item.discount_type === 'percentage' ? '0%' : 'PKR'"
@@ -1428,7 +1694,7 @@ function posSaleTerminal() {
                                     <template x-if="items.length === 0">
                                         <tr>
                                             <td :colspan="isIssueStockStore() ? 4 : 7" class="py-6 text-center text-slate-400 font-semibold">
-                                                No products selected. Click items from the catalog.
+                                                No items selected. Click catalog products or add custom add-ons above.
                                             </td>
                                         </tr>
                                     </template>
@@ -1594,6 +1860,42 @@ function posSaleTerminal() {
                                     <span class="text-[9px] font-black uppercase text-indigo-600 bg-indigo-100 px-1 py-0.2 rounded-xs">Multi</span>
                                 </span>
                             </button>
+                        </div>
+
+                        <!-- DEDICATED RECEIVING BANK ACCOUNT SELECTOR -->
+                        <div x-show="paymentMode === 'Bank' || (paymentMode === 'Split' && ((splitPayments.Bank || 0) > 0))" 
+                             x-transition:enter="transition ease-out duration-200"
+                             x-transition:enter-start="opacity-0 -translate-y-1"
+                             x-transition:enter-end="opacity-100 translate-y-0"
+                             x-cloak 
+                             class="p-3 bg-gradient-to-r from-blue-50/90 via-indigo-50/70 to-slate-50 border border-indigo-200 space-y-2">
+                            <div class="flex items-center justify-between">
+                                <label class="block text-xs font-black text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
+                                    <svg class="w-4 h-4 text-indigo-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
+                                    <span>Deposit Into Bank Account</span>
+                                </label>
+                                <span class="text-[10px] font-bold text-indigo-700 bg-white px-2 py-0.5 border border-indigo-200">
+                                    Where is money received?
+                                </span>
+                            </div>
+                            <select name="bank_account_id" x-model="bankAccountId" 
+                                    class="w-full bg-white border border-indigo-300 py-2 px-3 text-xs font-extrabold text-slate-900 focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 rounded-none shadow-2xs">
+                                <template x-for="b in bankAccountsList" :key="b.bankid">
+                                    <option :value="b.bankid" 
+                                            x-text="b.bank_name + ' — ' + b.account_title + ' (' + b.account_no + ')' + (b.branch_name ? ' • ' + b.branch_name : '')">
+                                    </option>
+                                </template>
+                            </select>
+                            <template x-if="getSelectedBankAccount()">
+                                <div class="flex items-center justify-between p-2 bg-white border border-indigo-100 text-[11px] text-slate-600">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="font-bold text-slate-900" x-text="getSelectedBankAccount().bank_name"></span>
+                                        <span class="text-slate-400">•</span>
+                                        <span class="font-mono text-indigo-700 font-bold" x-text="getSelectedBankAccount().account_no"></span>
+                                    </div>
+                                    <span class="font-semibold text-slate-600" x-text="getSelectedBankAccount().account_title"></span>
+                                </div>
+                            </template>
                         </div>
 
                         <!-- SPLIT PAYMENT BREAKDOWN PANEL -->
@@ -1851,34 +2153,71 @@ function posSaleTerminal() {
 
                         <!-- Regular Buttons (Normal Sales Mode) -->
                         <div x-show="!isIssueStockStore()" class="grid grid-cols-3 gap-2.5">
-                            <button type="button" @click="holdCurrentBill()" 
-                                    class="py-3 px-2 bg-amber-50 hover:bg-amber-100 text-amber-900 font-extrabold text-xs rounded-none transition-all flex items-center justify-center gap-1 border border-amber-300 shadow-2xs">
+                            <button type="button" @click="holdCurrentBill()" :disabled="isSubmitting"
+                                    class="py-3 px-2 bg-amber-50 hover:bg-amber-100 text-amber-900 font-extrabold text-xs rounded-none transition-all flex items-center justify-center gap-1 border border-amber-300 shadow-2xs"
+                                    :class="{ 'opacity-50 cursor-not-allowed pointer-events-none': isSubmitting }">
                                 <svg class="w-4 h-4 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                 <span>Hold Bill</span>
                             </button>
-                            <button type="button" @click="submitForm(true)" 
-                                    class="py-3 px-2 bg-slate-800 hover:bg-slate-900 text-white font-extrabold text-xs rounded-none transition-all flex items-center justify-center gap-1 border border-slate-900 shadow-2xs cursor-pointer">
-                                <svg class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
-                                <span>Save & Print 80mm</span>
+                            <button type="button" @click="submitForm(true)" :disabled="isSubmitting"
+                                    class="py-3 px-2 bg-slate-800 hover:bg-slate-900 text-white font-extrabold text-xs rounded-none transition-all flex items-center justify-center gap-1.5 border border-slate-900 shadow-2xs cursor-pointer"
+                                    :class="{ 'opacity-70 cursor-not-allowed pointer-events-none': isSubmitting }">
+                                <template x-if="isSubmitting">
+                                    <svg class="animate-spin w-4 h-4 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                    </svg>
+                                </template>
+                                <template x-if="!isSubmitting">
+                                    <svg class="w-4 h-4 text-slate-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
+                                </template>
+                                <span x-text="isSubmitting ? 'Processing...' : 'Save & Print 80mm'"></span>
                             </button>
-                            <button type="button" @click="submitForm(false)" 
-                                    class="py-3 px-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-none transition-all flex items-center justify-center gap-1 shadow-xs cursor-pointer">
-                                <svg class="w-4 h-4 fill-none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                                <span x-text="editingSaleId ? 'Update & Save Payment' : 'Complete'"></span>
+                            <button type="button" @click="submitForm(false)" :disabled="isSubmitting"
+                                    class="py-3 px-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-none transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                                    :class="{ 'opacity-70 cursor-not-allowed pointer-events-none': isSubmitting }">
+                                <template x-if="isSubmitting">
+                                    <svg class="animate-spin w-4 h-4 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                    </svg>
+                                </template>
+                                <template x-if="!isSubmitting">
+                                    <svg class="w-4 h-4 fill-none shrink-0" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                                </template>
+                                <span x-text="isSubmitting ? 'Processing...' : (editingSaleId ? 'Update & Save Payment' : 'Complete')"></span>
                             </button>
                         </div>
 
                         <!-- Direct Stock Out Action Buttons (ISSUE STOCK Mode) -->
                         <div x-show="isIssueStockStore()" class="grid grid-cols-3 gap-2.5">
-                            <button type="button" @click="submitForm(false)" 
-                                    class="col-span-2 py-3.5 px-4 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black text-xs rounded-none transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer border border-amber-500">
-                                <span class="text-sm">⚡</span>
-                                <span>Confirm Stock Out (Issue Stock)</span>
+                            <button type="button" @click="submitForm(false)" :disabled="isSubmitting"
+                                    class="col-span-2 py-3.5 px-4 bg-amber-400 hover:bg-amber-500 text-slate-950 font-black text-xs rounded-none transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer border border-amber-500"
+                                    :class="{ 'opacity-70 cursor-not-allowed pointer-events-none': isSubmitting }">
+                                <template x-if="isSubmitting">
+                                    <svg class="animate-spin w-4 h-4 text-slate-950 shrink-0" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                    </svg>
+                                </template>
+                                <template x-if="!isSubmitting">
+                                    <span class="text-sm">⚡</span>
+                                </template>
+                                <span x-text="isSubmitting ? 'Processing...' : 'Confirm Stock Out (Issue Stock)'"></span>
                             </button>
-                            <button type="button" @click="submitForm(true)" 
-                                    class="py-3.5 px-3 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs rounded-none transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer">
-                                <svg class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
-                                <span>Print Slip</span>
+                            <button type="button" @click="submitForm(true)" :disabled="isSubmitting"
+                                    class="py-3.5 px-3 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs rounded-none transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                                    :class="{ 'opacity-70 cursor-not-allowed pointer-events-none': isSubmitting }">
+                                <template x-if="isSubmitting">
+                                    <svg class="animate-spin w-4 h-4 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                    </svg>
+                                </template>
+                                <template x-if="!isSubmitting">
+                                    <svg class="w-4 h-4 text-slate-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
+                                </template>
+                                <span x-text="isSubmitting ? 'Processing...' : 'Print Slip'"></span>
                             </button>
                         </div>
 
@@ -1952,11 +2291,11 @@ function posSaleTerminal() {
                 </div>
 
                 <div>
-                    <select name="store_id" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-none text-xs font-bold focus:ring-2 focus:ring-indigo-600">
-                        <option value="">All Stores / Global</option>
-                        @foreach($stores as $s)
-                            <option value="{{ $s->id }}" {{ (string)$storeId === (string)$s->id ? 'selected' : '' }}>
-                                🏬 {{ $s->name }} {{ $s->is_default ? '(Default)' : '' }}
+                    <select name="main_category_id" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-none text-xs font-bold focus:ring-2 focus:ring-indigo-600">
+                        <option value="">All Main Categories</option>
+                        @foreach($mainCategories as $mc)
+                            <option value="{{ $mc->id }}" {{ (string)($mainCategoryId ?? '') === (string)$mc->id ? 'selected' : '' }}>
+                                📁 {{ $mc->title }}
                             </option>
                         @endforeach
                     </select>
@@ -1976,7 +2315,7 @@ function posSaleTerminal() {
                     <button type="submit" class="flex-1 py-2.5 bg-indigo-600 text-white font-bold text-xs rounded-none hover:bg-indigo-700 transition-colors shadow-xs">
                         Filter Sales
                     </button>
-                    @if($search || $storeId || $startDate || $endDate)
+                    @if($search || $mainCategoryId || $storeId || $startDate || $endDate)
                         <a href="{{ route('manager.sales.index') }}" class="px-4 py-2.5 bg-slate-100 text-slate-600 font-bold text-xs rounded-none hover:bg-slate-200 flex items-center justify-center border border-slate-200">
                             Reset
                         </a>
@@ -1993,7 +2332,7 @@ function posSaleTerminal() {
                         <tr class="bg-slate-50 border-b border-slate-200 text-slate-400 text-[10px] font-black uppercase tracking-wider">
                             <th class="py-4 px-3 text-center w-12 text-slate-400 font-mono">#</th>
                             <th class="py-4 px-4">Invoice #</th>
-                            <th class="py-4 px-4">Selling Branch</th>
+                            <th class="py-4 px-4">Main Category</th>
                             <th class="py-4 px-4">Client Name</th>
                             <th class="py-4 px-4">Sale Date</th>
                             <th class="py-4 px-4">Sold Items</th>
@@ -2016,8 +2355,8 @@ function posSaleTerminal() {
                                 </button>
                             </td>
                             <td class="py-4 px-4">
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-800 text-[11px] font-bold border border-slate-200">
-                                    🏬 {{ $sale->store ? $sale->store->name : ($defaultStore->name ?? 'Main Store') }}
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-50 text-indigo-800 text-[11px] font-bold border border-indigo-200">
+                                    📁 {{ $sale->mainCategory ? $sale->mainCategory->title : ($sale->store ? $sale->store->name : 'General') }}
                                 </span>
                             </td>
                             <td class="py-4 px-4 font-bold text-slate-900">
@@ -2034,7 +2373,12 @@ function posSaleTerminal() {
                                     @foreach($sale->items as $idx => $item)
                                         <p class="font-bold text-slate-800 text-[11px] flex items-center gap-1">
                                             <span class="text-slate-400 font-mono text-[10px]">{{ $idx + 1 }}.</span>
-                                            <span>{{ $item->product->title ?? 'Product' }}</span>
+                                            @if($item->is_addon || empty($item->product_id))
+                                                <span class="text-amber-900 font-bold">{{ $item->custom_title ?: 'Add-on' }}</span>
+                                                <span class="px-1 py-0.2 bg-amber-100 text-amber-800 text-[9px] font-black border border-amber-200 uppercase">Add-on</span>
+                                            @else
+                                                <span>{{ $item->product->title ?? 'Product' }}</span>
+                                            @endif
                                             <span class="px-1.5 py-0.2 bg-indigo-100 text-indigo-800 text-[10px] font-black rounded-none">x{{ $item->quantity }}</span>
                                         </p>
                                     @endforeach
@@ -2058,6 +2402,17 @@ function posSaleTerminal() {
                                     <span class="px-2 py-0.5 text-[10px] font-black uppercase bg-indigo-100 text-indigo-800 border border-indigo-200">
                                         SPLIT
                                     </span>
+                                @elseif(strtolower($sale->payment_mode ?? '') === 'bank')
+                                    <div class="flex flex-col gap-0.5">
+                                        <span class="px-2 py-0.5 text-[10px] font-black uppercase bg-indigo-100 text-indigo-800 border border-indigo-200 inline-block w-fit">
+                                            Bank
+                                        </span>
+                                        @if($sale->bankAccount)
+                                            <span class="text-[9.5px] font-bold text-indigo-700 font-mono">
+                                                {{ $sale->bankAccount->bank_name }} ({{ $sale->bankAccount->account_no }})
+                                            </span>
+                                        @endif
+                                    </div>
                                 @else
                                     <span class="px-2 py-0.5 text-[10px] font-black uppercase bg-slate-100 text-slate-700 border border-slate-200">
                                         {{ $sale->payment_mode ?? 'Cash' }}
@@ -2258,7 +2613,12 @@ function posSaleTerminal() {
                                         <tr>
                                             <td class="py-2 px-2.5 text-center font-mono font-bold text-slate-400 text-[10px]" x-text="idx + 1"></td>
                                             <td class="py-2 px-3 text-slate-900 leading-tight">
-                                                <div x-text="item.product ? item.product.title : 'Product'"></div>
+                                                <div class="flex items-center gap-1.5 flex-wrap">
+                                                    <span x-text="item.product ? item.product.title : (item.custom_title || 'Add-on')"></span>
+                                                    <template x-if="item.is_addon || !item.product_id">
+                                                        <span class="px-1 py-0.2 bg-amber-100 text-amber-800 text-[9px] font-black border border-amber-200 uppercase">Add-on</span>
+                                                    </template>
+                                                </div>
                                                 <template x-if="parseFloat(item.discount || 0) > 0">
                                                     <div class="text-[9px] text-emerald-600 font-bold">-PKR <span x-text="Number(item.discount).toLocaleString()"></span> discount</div>
                                                 </template>
@@ -2283,7 +2643,13 @@ function posSaleTerminal() {
                             </div>
                             <div class="flex items-center justify-between text-slate-700">
                                 <span>Payment Mode:</span>
-                                <span class="font-black uppercase" x-text="selectedSale.payment_mode || 'Cash'"></span>
+                                <span class="font-black uppercase flex items-center gap-1.5">
+                                    <span x-text="selectedSale.payment_mode || 'Cash'"></span>
+                                    <template x-if="selectedSale.bank_account">
+                                        <span class="text-[10px] bg-indigo-100 text-indigo-800 px-1.5 py-0.5 font-bold normal-case border border-indigo-200" 
+                                              x-text="selectedSale.bank_account.bank_name + ' • ' + selectedSale.bank_account.account_no"></span>
+                                    </template>
+                                </span>
                             </div>
                             <template x-if="selectedSale.payment_mode === 'Split' && selectedSale.split_payments">
                                 <div class="p-2 bg-indigo-50/70 border border-indigo-200 space-y-1 text-[11px]">
@@ -2326,7 +2692,10 @@ function posSaleTerminal() {
                                         Due: PKR <span x-text="Number(selectedSale.balance_due).toLocaleString()"></span>
                                     </span>
                                 </div>
-                                <form :action="'{{ url('manager/sales') }}/' + selectedSale.id + '/pay-remaining'" method="POST" class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <form x-data="{ isSubmitting: false, payMode: 'Cash', payBankId: (bankAccountsList.length > 0 ? bankAccountsList[0].bankid : '') }" 
+                                      :action="'{{ url('manager/sales') }}/' + selectedSale.id + '/pay-remaining'" method="POST" 
+                                      @submit="if(isSubmitting) { $event.preventDefault(); return false; } isSubmitting = true" 
+                                      class="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                     @csrf
                                     <div>
                                         <label class="block text-[10px] font-bold text-slate-500 mb-0.5">Amount to Pay</label>
@@ -2335,7 +2704,7 @@ function posSaleTerminal() {
                                     </div>
                                     <div>
                                         <label class="block text-[10px] font-bold text-slate-500 mb-0.5">Payment Mode</label>
-                                        <select name="payment_mode" class="w-full px-2 py-1.5 bg-white border border-rose-300 text-xs font-bold text-slate-800 rounded-none">
+                                        <select name="payment_mode" x-model="payMode" class="w-full px-2 py-1.5 bg-white border border-rose-300 text-xs font-bold text-slate-800 rounded-none">
                                             <option value="Cash">Cash</option>
                                             <option value="Card">Card</option>
                                             <option value="Bank">Bank Transfer</option>
@@ -2343,10 +2712,27 @@ function posSaleTerminal() {
                                         </select>
                                     </div>
                                     <div class="flex items-end">
-                                        <button type="submit" class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-none transition-colors shadow-xs cursor-pointer">
-                                            ✓ Pay Now
+                                        <button type="submit" :disabled="isSubmitting"
+                                                class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-none transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-70 disabled:cursor-not-allowed">
+                                            <template x-if="isSubmitting">
+                                                <svg class="animate-spin w-3.5 h-3.5 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                                </svg>
+                                            </template>
+                                            <span x-text="isSubmitting ? 'Paying...' : '✓ Pay Now'"></span>
                                         </button>
                                     </div>
+                                    <template x-if="payMode === 'Bank'">
+                                        <div class="sm:col-span-3 pt-1">
+                                            <label class="block text-[10px] font-bold text-indigo-900 mb-0.5">Select Receiving Bank Account</label>
+                                            <select name="bank_account_id" x-model="payBankId" class="w-full px-2 py-1.5 bg-white border border-indigo-300 text-xs font-extrabold text-slate-900 rounded-none">
+                                                <template x-for="b in bankAccountsList" :key="b.bankid">
+                                                    <option :value="b.bankid" x-text="b.bank_name + ' — ' + b.account_title + ' (' + b.account_no + ')'"></option>
+                                                </template>
+                                            </select>
+                                        </div>
+                                    </template>
                                 </form>
                             </div>
                         </template>
@@ -2710,6 +3096,11 @@ window.buildProductReceiptDocument = function(data, brand) {
                 <span style="font-weight: 400; color: #000;">Payment Mode:</span>
                 <span style="font-weight: 500; text-transform: uppercase; color: #000;">${data.paymentMode || 'Cash'}</span>
             </div>
+            ${data.bankAccountName ? `
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px; font-size: 11px;">
+                <span style="font-weight: 400; color: #000;">Receiving Bank:</span>
+                <span style="font-weight: 500; color: #000;">${data.bankAccountName} ${data.bankAccountNo ? '(' + data.bankAccountNo + ')' : ''}</span>
+            </div>` : ''}
 
             ${(data.paymentMode === 'Split' && data.splitPayments) ? `
             <div style="margin: 2px 0 3px 0; padding: 2px 4px; background: #f8fafc; border: 1px dashed #64748b; font-size: 10.5px;">

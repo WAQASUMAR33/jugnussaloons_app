@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Manager;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\AccountLedger;
+use App\Models\BankAccount;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Models\ProductMainCategory;
 use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\Store;
@@ -17,7 +19,7 @@ use Illuminate\Support\Facades\Cache;
 class SaleController extends Controller
 {
     /**
-     * Display a listing of sales transactions & active POS terminal with multi-store inventory.
+     * Display a listing of sales transactions & active POS terminal with main category organization.
      */
     public function index(Request $request)
     {
@@ -25,8 +27,9 @@ class SaleController extends Controller
         $startDate = $request->input('start_date');
         $endDate = $request->input('end_date');
         $storeId = $request->input('store_id');
+        $mainCategoryId = $request->input('main_category_id');
 
-        $query = Sale::with(['customer', 'store', 'items.product']);
+        $query = Sale::with(['customer', 'store', 'mainCategory', 'bankAccount', 'items.product']);
 
         if ($search) {
             $query->where(function ($q) use ($search) {
@@ -35,6 +38,10 @@ class SaleController extends Controller
                       $cq->where('name', 'like', "%{$search}%");
                   });
             });
+        }
+
+        if ($mainCategoryId) {
+            $query->where('product_main_category_id', $mainCategoryId);
         }
 
         if ($storeId) {
@@ -126,19 +133,24 @@ class SaleController extends Controller
 
         $defaultCustomer = $walkinCustomer;
 
-        $products = Product::with(['storeStocks', 'category', 'purchaseItems'])->orderBy('title')->get();
-        $productCategories = ProductCategory::orderBy('title')->get();
+        $mainCategories = ProductMainCategory::where('is_active', true)->orderBy('title')->get();
+        $products = Product::with(['mainCategory', 'category', 'storeStocks', 'purchaseItems'])->orderBy('title')->get();
+        $productCategories = ProductCategory::with('mainCategory')->orderBy('title')->get();
         $stores = Store::where('is_active', true)->orderBy('is_default', 'desc')->orderBy('name')->get();
         $defaultStore = Store::getDefaultStore();
+        $bankAccounts = BankAccount::where('is_active', true)->orderBy('bank_name')->get();
 
         return view('manager.sales.index', compact(
             'sales', 
             'customers', 
             'defaultCustomer',
             'products', 
+            'mainCategories',
+            'mainCategoryId',
             'productCategories',
             'stores',
             'defaultStore',
+            'bankAccounts',
             'storeId',
             'search',
             'startDate',
@@ -158,6 +170,7 @@ class SaleController extends Controller
     {
         $validated = $request->validate([
             'account_id' => ['required', 'exists:accounts,id'],
+            'product_main_category_id' => ['nullable', 'exists:product_main_categories,id'],
             'store_id' => ['nullable', 'exists:stores,id'],
             'sale_date' => ['required', 'date'],
             'discount' => ['nullable', 'numeric', 'min:0'],
@@ -165,10 +178,13 @@ class SaleController extends Controller
             'received_amount' => ['nullable', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string', 'max:1000'],
             'payment_mode' => ['nullable', 'string', 'in:Cash,Card,Bank,Other,Split'],
+            'bank_account_id' => ['nullable', 'exists:bank_accounts,bankid'],
             'split_payments' => ['nullable'],
             'extra_amount' => ['nullable', 'numeric', 'min:0'],
             'items' => ['required', 'array', 'min:1'],
-            'items.*.product_id' => ['required', 'exists:products,id'],
+            'items.*.product_id' => ['nullable'],
+            'items.*.custom_title' => ['nullable', 'string', 'max:255'],
+            'items.*.is_addon' => ['nullable'],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
             'items.*.unit_price' => ['required', 'numeric', 'min:0'],
             'items.*.discount' => ['nullable', 'numeric', 'min:0'],
@@ -192,14 +208,20 @@ class SaleController extends Controller
         // Track low stock warnings for the selling store (allows sale to proceed)
         $lowStockNotes = [];
         foreach ($validated['items'] as $itemData) {
-            $product = Product::findOrFail($itemData['product_id']);
-            $branchStock = $product->stockInStore($storeId);
-            if ($branchStock < (int) $itemData['quantity']) {
-                $lowStockNotes[] = "'{$product->title}' (Branch Stock was: {$branchStock}, Sold: {$itemData['quantity']})";
+            $isAddon = !empty($itemData['is_addon']) || empty($itemData['product_id']);
+            if ($isAddon) {
+                continue;
+            }
+            $product = Product::find($itemData['product_id']);
+            if ($product) {
+                $currentStock = $product->stock;
+                if ($currentStock < (int) $itemData['quantity']) {
+                    $lowStockNotes[] = "'{$product->title}' (Current Stock: {$currentStock}, Sold: {$itemData['quantity']})";
+                }
             }
         }
 
-        // Split payments parsing
+        // Split payments & Bank Account parsing
         $paymentMode = $isIssueStock ? 'Issue Stock' : ($validated['payment_mode'] ?? 'Cash');
         $splitPayments = null;
         if ($paymentMode === 'Split') {
@@ -219,6 +241,9 @@ class SaleController extends Controller
             }
         }
 
+        $isBankPayment = ($paymentMode === 'Bank') || ($paymentMode === 'Split' && !empty($splitPayments['Bank']) && $splitPayments['Bank'] > 0);
+        $bankAccountId = $isBankPayment ? (!empty($validated['bank_account_id']) ? (int) $validated['bank_account_id'] : null) : null;
+
         // Calculate items subtotal, item-level discounts, and line items
         $discount = $isIssueStock ? 0.00 : (float) ($validated['discount'] ?? 0);
         $subtotalAmount = 0;
@@ -226,7 +251,7 @@ class SaleController extends Controller
         $processedLineItems = [];
 
         foreach ($validated['items'] as $item) {
-            $product = Product::findOrFail($item['product_id']);
+            $isAddon = !empty($item['is_addon']) || empty($item['product_id']);
             $qty = (int) $item['quantity'];
             $basePrice = $isIssueStock ? 0.00 : (float) $item['unit_price'];
             $rawItemDisc = $isIssueStock ? 0.00 : (float) ($item['discount'] ?? 0);
@@ -246,20 +271,38 @@ class SaleController extends Controller
             $subtotalAmount += $lineSubtotal;
             $totalItemDiscounts += $lineDiscTotal;
 
-            $purchaseRate = $isIssueStock ? 0.00 : (float) ($product->purchase_price ?: ($product->purchaseItems()->latest('id')->value('unit_price') ?: 0.00));
-            if (!$isIssueStock && $purchaseRate <= 0) {
-                $purchaseRate = (float) $product->price;
-            }
+            if ($isAddon) {
+                $customTitle = !empty($item['custom_title']) ? trim($item['custom_title']) : 'Add-on';
+                $processedLineItems[] = [
+                    'product_id' => null,
+                    'custom_title' => $customTitle,
+                    'is_addon' => true,
+                    'quantity' => $qty,
+                    'purchase_price' => 0.00,
+                    'unit_price' => $basePrice,
+                    'discount' => $lineDiscTotal,
+                    'discount_type' => $discType,
+                    'subtotal' => $lineSubtotal,
+                ];
+            } else {
+                $product = Product::findOrFail($item['product_id']);
+                $purchaseRate = $isIssueStock ? 0.00 : (float) ($product->purchase_price ?: ($product->purchaseItems()->latest('id')->value('unit_price') ?: 0.00));
+                if (!$isIssueStock && $purchaseRate <= 0) {
+                    $purchaseRate = (float) $product->price;
+                }
 
-            $processedLineItems[] = [
-                'product_id' => $product->id,
-                'quantity' => $qty,
-                'purchase_price' => $purchaseRate,
-                'unit_price' => $basePrice,
-                'discount' => $lineDiscTotal,
-                'discount_type' => $discType,
-                'subtotal' => $lineSubtotal,
-            ];
+                $processedLineItems[] = [
+                    'product_id' => $product->id,
+                    'custom_title' => null,
+                    'is_addon' => false,
+                    'quantity' => $qty,
+                    'purchase_price' => $purchaseRate,
+                    'unit_price' => $basePrice,
+                    'discount' => $lineDiscTotal,
+                    'discount_type' => $discType,
+                    'subtotal' => $lineSubtotal,
+                ];
+            }
         }
 
         $discountPercentage = $subtotalAmount > 0 ? round(($discount / $subtotalAmount) * 100, 2) : 0.00;
@@ -290,7 +333,7 @@ class SaleController extends Controller
             }
         }
 
-        DB::transaction(function () use ($validated, $storeId, $isIssueStock, $processedLineItems, $subtotalAmount, $discount, $paymentMode, $splitPayments) {
+        DB::transaction(function () use ($validated, $storeId, $isIssueStock, $processedLineItems, $subtotalAmount, $discount, $paymentMode, $splitPayments, $bankAccountId) {
             $account = Account::findOrFail($validated['account_id']);
             $saleDate = $validated['sale_date'];
             $extraAmount = $isIssueStock ? 0.00 : (in_array($paymentMode, ['Card', 'Bank', 'Split']) ? (float) ($validated['extra_amount'] ?? 0) : 0.00);
@@ -315,6 +358,7 @@ class SaleController extends Controller
             $sale = Sale::create([
                 'invoice_no' => $invoiceNo,
                 'account_id' => $account->id,
+                'product_main_category_id' => $validated['product_main_category_id'] ?? null,
                 'store_id' => $storeId,
                 'total_amount' => $totalAmount,
                 'discount' => $discount,
@@ -323,17 +367,18 @@ class SaleController extends Controller
                 'sale_date' => $saleDate,
                 'notes' => $validated['notes'] ?? ($isIssueStock ? 'Stock Issued (Zero Value)' : null),
                 'payment_mode' => $paymentMode,
+                'bank_account_id' => $bankAccountId,
                 'split_payments' => $splitPayments,
                 'extra_amount' => $extraAmount,
             ]);
 
-            // 2. Create Line Items & Decrement Stock from Selling Store
+            // 2. Create Line Items & Decrement Stock
             foreach ($processedLineItems as $itemData) {
-                $product = Product::findOrFail($itemData['product_id']);
-                
                 SaleItem::create([
                     'sale_id' => $sale->id,
                     'product_id' => $itemData['product_id'],
+                    'custom_title' => $itemData['custom_title'] ?? null,
+                    'is_addon' => !empty($itemData['is_addon']),
                     'quantity' => $itemData['quantity'],
                     'purchase_price' => $itemData['purchase_price'],
                     'unit_price' => $itemData['unit_price'],
@@ -342,8 +387,14 @@ class SaleController extends Controller
                     'subtotal' => $itemData['subtotal'],
                 ]);
 
-                // Decrement Product Stock specifically in selling store
-                $product->decrementStoreStock($storeId, (int) $itemData['quantity']);
+                // Decrement Product Stock directly and sync store stock (skip for add-ons)
+                if (!empty($itemData['product_id'])) {
+                    $product = Product::find($itemData['product_id']);
+                    if ($product) {
+                        $product->decrement('stock', (int) $itemData['quantity']);
+                        $product->decrementStoreStock($storeId, (int) $itemData['quantity']);
+                    }
+                }
             }
 
             // 3. Write Sale Ledger Entry (Debit/Credit)
@@ -374,16 +425,23 @@ class SaleController extends Controller
 
                 if ($receivedAmount > 0) {
                     $receivingDesc = "Payment received for Sale Invoice #{$invoiceNo}";
+                    $bankInfo = '';
+                    if ($bankAccountId) {
+                        $ba = BankAccount::find($bankAccountId);
+                        if ($ba) {
+                            $bankInfo = " • Bank: {$ba->bank_name} ({$ba->account_no})";
+                        }
+                    }
                     if ($paymentMode === 'Split' && is_array($splitPayments)) {
                         $parts = [];
                         foreach ($splitPayments as $m => $val) {
                             if ($val > 0) $parts[] = "{$m}: PKR " . number_format($val, 2);
                         }
                         if (!empty($parts)) {
-                            $receivingDesc .= " (Split: " . implode(', ', $parts) . ")";
+                            $receivingDesc .= " (Split: " . implode(', ', $parts) . "{$bankInfo})";
                         }
                     } elseif (!empty($paymentMode)) {
-                        $receivingDesc .= " ({$paymentMode})";
+                        $receivingDesc .= " ({$paymentMode}{$bankInfo})";
                     }
 
                     AccountLedger::create([
@@ -420,6 +478,7 @@ class SaleController extends Controller
     {
         $validated = $request->validate([
             'account_id' => ['required', 'exists:accounts,id'],
+            'product_main_category_id' => ['nullable', 'exists:product_main_categories,id'],
             'store_id' => ['nullable', 'exists:stores,id'],
             'sale_date' => ['required', 'date'],
             'discount' => ['nullable', 'numeric', 'min:0'],
@@ -428,10 +487,13 @@ class SaleController extends Controller
             'additional_payment' => ['nullable', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string', 'max:1000'],
             'payment_mode' => ['nullable', 'string', 'in:Cash,Card,Bank,Other,Split'],
+            'bank_account_id' => ['nullable', 'exists:bank_accounts,bankid'],
             'split_payments' => ['nullable'],
             'extra_amount' => ['nullable', 'numeric', 'min:0'],
             'items' => ['required', 'array', 'min:1'],
-            'items.*.product_id' => ['required', 'exists:products,id'],
+            'items.*.product_id' => ['nullable'],
+            'items.*.custom_title' => ['nullable', 'string', 'max:255'],
+            'items.*.is_addon' => ['nullable'],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
             'items.*.unit_price' => ['required', 'numeric', 'min:0'],
             'items.*.discount' => ['nullable', 'numeric', 'min:0'],
@@ -442,7 +504,7 @@ class SaleController extends Controller
         $store = Store::find($storeId);
         $isIssueStock = $store && (strtoupper(trim($store->name)) === 'ISSUE STOCK' || strtoupper(trim($store->code)) === 'ISSUE STOCK');
 
-        // Split payments parsing
+        // Split payments & Bank Account parsing
         $paymentMode = $isIssueStock ? 'Issue Stock' : ($validated['payment_mode'] ?? $sale->payment_mode ?? 'Cash');
         $splitPayments = null;
         if ($paymentMode === 'Split') {
@@ -462,6 +524,9 @@ class SaleController extends Controller
             }
         }
 
+        $isBankPayment = ($paymentMode === 'Bank') || ($paymentMode === 'Split' && !empty($splitPayments['Bank']) && $splitPayments['Bank'] > 0);
+        $bankAccountId = $isBankPayment ? (!empty($validated['bank_account_id']) ? (int) $validated['bank_account_id'] : $sale->bank_account_id) : null;
+
         // Calculate items subtotal, item-level discounts, and line items
         $discount = $isIssueStock ? 0.00 : (float) ($validated['discount'] ?? 0);
         $subtotalAmount = 0;
@@ -469,7 +534,7 @@ class SaleController extends Controller
         $processedLineItems = [];
 
         foreach ($validated['items'] as $item) {
-            $product = Product::findOrFail($item['product_id']);
+            $isAddon = !empty($item['is_addon']) || empty($item['product_id']);
             $qty = (int) $item['quantity'];
             $basePrice = $isIssueStock ? 0.00 : (float) $item['unit_price'];
             $rawItemDisc = $isIssueStock ? 0.00 : (float) ($item['discount'] ?? 0);
@@ -489,20 +554,38 @@ class SaleController extends Controller
             $subtotalAmount += $lineSubtotal;
             $totalItemDiscounts += $lineDiscTotal;
 
-            $purchaseRate = $isIssueStock ? 0.00 : (float) ($product->purchase_price ?: ($product->purchaseItems()->latest('id')->value('unit_price') ?: 0.00));
-            if (!$isIssueStock && $purchaseRate <= 0) {
-                $purchaseRate = (float) $product->price;
-            }
+            if ($isAddon) {
+                $customTitle = !empty($item['custom_title']) ? trim($item['custom_title']) : 'Add-on';
+                $processedLineItems[] = [
+                    'product_id' => null,
+                    'custom_title' => $customTitle,
+                    'is_addon' => true,
+                    'quantity' => $qty,
+                    'purchase_price' => 0.00,
+                    'unit_price' => $basePrice,
+                    'discount' => $lineDiscTotal,
+                    'discount_type' => $discType,
+                    'subtotal' => $lineSubtotal,
+                ];
+            } else {
+                $product = Product::findOrFail($item['product_id']);
+                $purchaseRate = $isIssueStock ? 0.00 : (float) ($product->purchase_price ?: ($product->purchaseItems()->latest('id')->value('unit_price') ?: 0.00));
+                if (!$isIssueStock && $purchaseRate <= 0) {
+                    $purchaseRate = (float) $product->price;
+                }
 
-            $processedLineItems[] = [
-                'product_id' => $product->id,
-                'quantity' => $qty,
-                'purchase_price' => $purchaseRate,
-                'unit_price' => $basePrice,
-                'discount' => $lineDiscTotal,
-                'discount_type' => $discType,
-                'subtotal' => $lineSubtotal,
-            ];
+                $processedLineItems[] = [
+                    'product_id' => $product->id,
+                    'custom_title' => null,
+                    'is_addon' => false,
+                    'quantity' => $qty,
+                    'purchase_price' => $purchaseRate,
+                    'unit_price' => $basePrice,
+                    'discount' => $lineDiscTotal,
+                    'discount_type' => $discType,
+                    'subtotal' => $lineSubtotal,
+                ];
+            }
         }
 
         $discountPercentage = $subtotalAmount > 0 ? round(($discount / $subtotalAmount) * 100, 2) : 0.00;
@@ -533,17 +616,20 @@ class SaleController extends Controller
             }
         }
 
-        DB::transaction(function () use ($validated, $sale, $storeId, $isIssueStock, $processedLineItems, $subtotalAmount, $discount, $paymentMode, $splitPayments) {
+        DB::transaction(function () use ($validated, $sale, $storeId, $isIssueStock, $processedLineItems, $subtotalAmount, $discount, $paymentMode, $splitPayments, $bankAccountId) {
             $invoiceNo = $sale->invoice_no;
             $oldCustomer = Account::find($sale->account_id);
             $newCustomer = Account::findOrFail($validated['account_id']);
 
-            // 1. Revert previous inventory deductions for this sale
+            // 1. Revert previous inventory deductions for this sale (skip add-ons)
             $oldStoreId = $sale->store_id ?: $storeId;
             foreach ($sale->items as $oldItem) {
-                $oldProduct = Product::find($oldItem->product_id);
-                if ($oldProduct) {
-                    $oldProduct->incrementStoreStock($oldStoreId, (int) $oldItem->quantity);
+                if (!empty($oldItem->product_id)) {
+                    $oldProduct = Product::find($oldItem->product_id);
+                    if ($oldProduct) {
+                        $oldProduct->increment('stock', (int) $oldItem->quantity);
+                        $oldProduct->incrementStoreStock($oldStoreId, (int) $oldItem->quantity);
+                    }
                 }
             }
 
@@ -587,6 +673,7 @@ class SaleController extends Controller
             // 4. Update Sale Record
             $sale->update([
                 'account_id' => $newCustomer->id,
+                'product_main_category_id' => $validated['product_main_category_id'] ?? $sale->product_main_category_id,
                 'store_id' => $storeId,
                 'total_amount' => $totalAmount,
                 'discount' => $discount,
@@ -595,17 +682,18 @@ class SaleController extends Controller
                 'sale_date' => $saleDate,
                 'notes' => $validated['notes'] ?? ($isIssueStock ? 'Stock Issued (Zero Value)' : null),
                 'payment_mode' => $paymentMode,
+                'bank_account_id' => $bankAccountId,
                 'split_payments' => $splitPayments,
                 'extra_amount' => $extraAmount,
             ]);
 
-            // 5. Create New Line Items & Decrement Stock from Selling Store
+            // 5. Create New Line Items & Decrement Stock
             foreach ($processedLineItems as $itemData) {
-                $product = Product::findOrFail($itemData['product_id']);
-                
                 SaleItem::create([
                     'sale_id' => $sale->id,
                     'product_id' => $itemData['product_id'],
+                    'custom_title' => $itemData['custom_title'] ?? null,
+                    'is_addon' => !empty($itemData['is_addon']),
                     'quantity' => $itemData['quantity'],
                     'purchase_price' => $itemData['purchase_price'],
                     'unit_price' => $itemData['unit_price'],
@@ -614,7 +702,14 @@ class SaleController extends Controller
                     'subtotal' => $itemData['subtotal'],
                 ]);
 
-                $product->decrementStoreStock($storeId, (int) $itemData['quantity']);
+                // Decrement Product Stock directly and sync store stock (skip add-ons)
+                if (!empty($itemData['product_id'])) {
+                    $product = Product::find($itemData['product_id']);
+                    if ($product) {
+                        $product->decrement('stock', (int) $itemData['quantity']);
+                        $product->decrementStoreStock($storeId, (int) $itemData['quantity']);
+                    }
+                }
             }
 
             // 6. Write New Customer Ledgers
@@ -648,16 +743,23 @@ class SaleController extends Controller
 
                 if ($receivedAmount > 0) {
                     $receivingDesc = "Payment received for Sale Invoice #{$invoiceNo}";
+                    $bankInfo = '';
+                    if ($bankAccountId) {
+                        $ba = BankAccount::find($bankAccountId);
+                        if ($ba) {
+                            $bankInfo = " • Bank: {$ba->bank_name} ({$ba->account_no})";
+                        }
+                    }
                     if ($paymentMode === 'Split' && is_array($splitPayments)) {
                         $parts = [];
                         foreach ($splitPayments as $m => $val) {
                             if ($val > 0) $parts[] = "{$m}: PKR " . number_format($val, 2);
                         }
                         if (!empty($parts)) {
-                            $receivingDesc .= " (Split: " . implode(', ', $parts) . ")";
+                            $receivingDesc .= " (Split: " . implode(', ', $parts) . "{$bankInfo})";
                         }
                     } elseif (!empty($paymentMode)) {
-                        $receivingDesc .= " ({$paymentMode})";
+                        $receivingDesc .= " ({$paymentMode}{$bankInfo})";
                     }
 
                     AccountLedger::create([
@@ -692,13 +794,16 @@ class SaleController extends Controller
         $validated = $request->validate([
             'payment_amount' => ['required', 'numeric', 'min:0.01', 'max:' . max(0.01, (float)$sale->balance_due)],
             'payment_mode' => ['nullable', 'string', 'in:Cash,Card,Bank,Other'],
+            'bank_account_id' => ['nullable', 'exists:bank_accounts,bankid'],
             'notes' => ['nullable', 'string', 'max:500'],
         ]);
 
         $amountToPay = (float) $validated['payment_amount'];
         $paymentMode = $validated['payment_mode'] ?? 'Cash';
+        $isBankPayment = ($paymentMode === 'Bank');
+        $bankAccountId = $isBankPayment ? (!empty($validated['bank_account_id']) ? (int) $validated['bank_account_id'] : $sale->bank_account_id) : $sale->bank_account_id;
 
-        DB::transaction(function () use ($sale, $amountToPay, $paymentMode) {
+        DB::transaction(function () use ($sale, $amountToPay, $paymentMode, $bankAccountId, $isBankPayment) {
             $customer = $sale->customer;
             $newReceived = round($sale->received_amount + $amountToPay, 2);
             $newBalanceDue = max(0, round($sale->total_amount - $newReceived, 2));
@@ -707,18 +812,26 @@ class SaleController extends Controller
                 'received_amount' => $newReceived,
                 'balance_due' => $newBalanceDue,
                 'payment_mode' => $paymentMode,
+                'bank_account_id' => $bankAccountId,
             ]);
 
             if ($customer) {
                 $newCustBalance = $customer->balance - $amountToPay;
                 $refNo = $sale->invoice_no . '-PAY-' . time();
+                $bankDesc = '';
+                if ($isBankPayment && $bankAccountId) {
+                    $ba = BankAccount::find($bankAccountId);
+                    if ($ba) {
+                        $bankDesc = " • Bank: {$ba->bank_name} ({$ba->account_no})";
+                    }
+                }
 
                 AccountLedger::create([
                     'account_id' => $customer->id,
                     'date' => now()->toDateString(),
                     'type' => 'receiving',
                     'reference_no' => $refNo,
-                    'description' => "Remaining balance payment of PKR " . number_format($amountToPay, 2) . " received for Invoice #{$sale->invoice_no} ({$paymentMode})",
+                    'description' => "Remaining balance payment of PKR " . number_format($amountToPay, 2) . " received for Invoice #{$sale->invoice_no} ({$paymentMode}{$bankDesc})",
                     'debit' => 0.00,
                     'credit' => $amountToPay,
                     'running_balance' => $newCustBalance,

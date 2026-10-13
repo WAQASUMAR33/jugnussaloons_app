@@ -14,6 +14,7 @@ class Sale extends Model
     protected $fillable = [
         'invoice_no',
         'account_id',
+        'product_main_category_id',
         'store_id',
         'total_amount',
         'discount',
@@ -22,6 +23,7 @@ class Sale extends Model
         'sale_date',
         'notes',
         'payment_mode',
+        'bank_account_id',
         'split_payments',
         'extra_amount',
     ];
@@ -35,6 +37,22 @@ class Sale extends Model
         'extra_amount' => 'decimal:2',
         'split_payments' => 'array',
     ];
+
+    /**
+     * Bank account if paid via bank.
+     */
+    public function bankAccount(): BelongsTo
+    {
+        return $this->belongsTo(BankAccount::class, 'bank_account_id', 'bankid');
+    }
+
+    /**
+     * Main category for this sale.
+     */
+    public function mainCategory(): BelongsTo
+    {
+        return $this->belongsTo(ProductMainCategory::class, 'product_main_category_id');
+    }
 
     /**
      * Store location where sale occurred.

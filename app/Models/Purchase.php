@@ -14,6 +14,7 @@ class Purchase extends Model
     protected $fillable = [
         'invoice_no',
         'account_id',
+        'product_main_category_id',
         'store_id',
         'total_amount',
         'paid_amount',
@@ -28,6 +29,14 @@ class Purchase extends Model
         'paid_amount' => 'decimal:2',
         'balance_due' => 'decimal:2',
     ];
+
+    /**
+     * Main category for this purchase.
+     */
+    public function mainCategory(): BelongsTo
+    {
+        return $this->belongsTo(ProductMainCategory::class, 'product_main_category_id');
+    }
 
     /**
      * Store relationship.

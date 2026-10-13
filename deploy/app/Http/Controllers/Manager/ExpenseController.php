@@ -49,19 +49,69 @@ class ExpenseController extends Controller
         $totalExpensesAmount = (float) (clone $query)->sum('amount');
         $totalExpensesCount = (clone $query)->count();
 
-        // This Month's Total
-        $thisMonthTotal = (float) Expense::whereYear('created_at', date('Y'))
-            ->whereMonth('created_at', date('m'))
-            ->sum('amount');
+        // This Month / Selected Dates Total Metric
+        // When date filter is applied, shows the expense of those dates; on default, shows the month's total
+        $hasDateFilter = !empty($dateFrom) || !empty($dateTo);
+        if ($hasDateFilter) {
+            $periodExpenseQuery = Expense::query();
+            if ($search) {
+                $periodExpenseQuery->where('exp_title', 'like', "%{$search}%");
+            }
+            if ($categoryId) {
+                $periodExpenseQuery->where('exp_category_id', $categoryId);
+            }
+            if ($dateFrom) {
+                $periodExpenseQuery->whereDate('created_at', '>=', $dateFrom);
+            }
+            if ($dateTo) {
+                $periodExpenseQuery->whereDate('created_at', '<=', $dateTo);
+            }
+            $monthOrPeriodTotal = (float) $periodExpenseQuery->sum('amount');
+        } else {
+            $monthOrPeriodTotal = (float) Expense::whereYear('created_at', date('Y'))
+                ->whereMonth('created_at', date('m'))
+                ->sum('amount');
+        }
+        $thisMonthTotal = $monthOrPeriodTotal;
 
-        // Category-wise Breakdown Analytics
-        $categoryBreakdown = Expense::select('exp_category_id', DB::raw('SUM(amount) as total_amount'), DB::raw('COUNT(*) as count'))
-            ->with('category')
-            ->groupBy('exp_category_id')
+        // Category-wise Breakdown Analytics (Filtered by current search & dates)
+        $categoryBreakdownQuery = Expense::select('exp_category_id', DB::raw('SUM(amount) as total_amount'), DB::raw('COUNT(*) as count'))
+            ->with('category');
+
+        if ($search) {
+            $categoryBreakdownQuery->where('exp_title', 'like', "%{$search}%");
+        }
+        if ($categoryId) {
+            $categoryBreakdownQuery->where('exp_category_id', $categoryId);
+        }
+        if ($dateFrom) {
+            $categoryBreakdownQuery->whereDate('created_at', '>=', $dateFrom);
+        }
+        if ($dateTo) {
+            $categoryBreakdownQuery->whereDate('created_at', '<=', $dateTo);
+        }
+
+        $categoryBreakdown = $categoryBreakdownQuery->groupBy('exp_category_id')
             ->orderBy('total_amount', 'desc')
             ->get();
 
         $topCategory = $categoryBreakdown->first();
+
+        // Aesthetic Expense Metrics (Filtered by current search & dates)
+        $aestheticQuery = Expense::whereHas('category', function ($q) {
+            $q->where('title', 'like', '%Aesthetic%');
+        });
+        if ($search) {
+            $aestheticQuery->where('exp_title', 'like', "%{$search}%");
+        }
+        if ($dateFrom) {
+            $aestheticQuery->whereDate('created_at', '>=', $dateFrom);
+        }
+        if ($dateTo) {
+            $aestheticQuery->whereDate('created_at', '<=', $dateTo);
+        }
+        $aestheticTotal = (float) $aestheticQuery->sum('amount');
+        $aestheticCount = (int) $aestheticQuery->count();
 
         $categories = ExpenseCategory::orderBy('title')->get();
         $appSetting = \App\Models\Setting::first();
@@ -77,8 +127,12 @@ class ExpenseController extends Controller
             'totalExpensesAmount',
             'totalExpensesCount',
             'thisMonthTotal',
+            'monthOrPeriodTotal',
+            'hasDateFilter',
             'categoryBreakdown',
             'topCategory',
+            'aestheticTotal',
+            'aestheticCount',
             'appSetting'
         ));
     }

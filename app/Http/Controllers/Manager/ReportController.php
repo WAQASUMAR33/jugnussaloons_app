@@ -8,6 +8,8 @@ use App\Models\AccountCategory;
 use App\Models\AccountLedger;
 use App\Models\Appointment;
 use App\Models\Product;
+use App\Models\ProductCategory;
+use App\Models\ProductMainCategory;
 use App\Models\Purchase;
 use App\Models\Sale;
 use App\Models\SaloonService;
@@ -21,6 +23,8 @@ use App\Models\SalaryAdvance;
 use App\Models\DayClosing;
 use App\Models\BankAccount;
 use App\Models\AppointmentPayment;
+use App\Models\SaleItem;
+use App\Models\AppointmentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -36,7 +40,7 @@ class ReportController extends Controller
         $categoryId = $request->input('account_category_id');
         $reportType = $request->input('report_type', 'datewise');
 
-        $query = Sale::with(['customer.category', 'items.product'])
+        $query = Sale::with(['customer.category', 'items.product', 'bankAccount'])
             ->whereBetween('sale_date', [$startDate, $endDate]);
 
         if ($categoryId) {
@@ -102,78 +106,58 @@ class ReportController extends Controller
     }
 
     /**
-     * 2. Stock Report (Multi-Store Support)
+     * 2. Stock Report (Main Category & Sub-Category Support)
      */
     public function stock(Request $request)
     {
-        $status = $request->input('status'); // all, low, out
+        $status = $request->input('status'); // all, low, out, healthy
         $search = $request->input('search');
+        $mainCategoryId = $request->input('product_main_category_id');
+        $categoryId = $request->input('product_category_id');
         $storeId = $request->input('store_id');
 
+        $mainCategories = ProductMainCategory::where('is_active', true)->orderBy('title')->get();
+        $categories = ProductCategory::orderBy('title')->get();
         $stores = Store::where('is_active', true)->orderBy('is_default', 'desc')->orderBy('name')->get();
-        $query = Product::with(['storeStocks.store']);
+
+        $query = Product::with(['mainCategory', 'category', 'storeStocks.store']);
 
         if ($search) {
-            $query->where('title', 'like', "%{$search}%");
+            $query->where(function($q) use ($search) {
+                $q->where('title', 'like', "%{$search}%")
+                  ->orWhere('code', 'like', "%{$search}%");
+            });
         }
 
-        if ($storeId) {
-            if ($status === 'out') {
-                $query->whereHas('storeStocks', function ($q) use ($storeId) {
-                    $q->where('store_id', $storeId)->where('stock', '<=', 0);
-                });
-            } elseif ($status === 'low') {
-                $query->whereHas('storeStocks', function ($q) use ($storeId) {
-                    $q->where('store_id', $storeId)->where('stock', '>', 0)->whereColumn('stock', '<=', 'low_stock');
-                });
-            } elseif ($status === 'healthy') {
-                $query->whereHas('storeStocks', function ($q) use ($storeId) {
-                    $q->where('store_id', $storeId)->whereColumn('stock', '>', 'low_stock');
-                });
-            }
-
-            $products = (clone $query)->paginate(15)->withQueryString();
-
-            // Store specific metrics
-            $totalProductsCount = Product::count();
-            $totalStockUnits = (int) ProductStoreStock::where('store_id', $storeId)->sum('stock');
-            $totalCostValuation = (float) DB::table('product_store_stocks')
-                ->join('products', 'product_store_stocks.product_id', '=', 'products.id')
-                ->where('product_store_stocks.store_id', $storeId)
-                ->sum(DB::raw('product_store_stocks.stock * products.price'));
-            $totalRetailValuation = (float) DB::table('product_store_stocks')
-                ->join('products', 'product_store_stocks.product_id', '=', 'products.id')
-                ->where('product_store_stocks.store_id', $storeId)
-                ->sum(DB::raw('product_store_stocks.stock * products.discounted_price'));
-            $lowStockCount = (int) ProductStoreStock::where('store_id', $storeId)
-                ->where('stock', '>', 0)
-                ->whereColumn('stock', '<=', 'low_stock')
-                ->count();
-            $outOfStockCount = (int) ProductStoreStock::where('store_id', $storeId)
-                ->where('stock', '<=', 0)
-                ->count();
-        } else {
-            if ($status === 'out') {
-                $query->where('stock', '<=', 0);
-            } elseif ($status === 'low') {
-                $query->where('stock', '>', 0)->where('stock', '<=', 5);
-            } elseif ($status === 'healthy') {
-                $query->where('stock', '>', 5);
-            }
-
-            $products = (clone $query)->orderBy('stock', 'asc')->paginate(15)->withQueryString();
-
-            // Overall System Inventory Summary
-            $totalProductsCount = Product::count();
-            $totalStockUnits = Product::sum('stock');
-            $totalCostValuation = Product::sum(DB::raw('stock * price'));
-            $totalRetailValuation = Product::sum(DB::raw('stock * discounted_price'));
-            $lowStockCount = Product::where('stock', '>', 0)->where('stock', '<=', 5)->count();
-            $outOfStockCount = Product::where('stock', '<=', 0)->count();
+        if ($mainCategoryId) {
+            $query->where('product_main_category_id', $mainCategoryId);
         }
+
+        if ($categoryId) {
+            $query->where('product_category_id', $categoryId);
+        }
+
+        if ($status === 'out') {
+            $query->where('stock', '<=', 0);
+        } elseif ($status === 'low') {
+            $query->where('stock', '>', 0)->where('stock', '<=', 5);
+        } elseif ($status === 'healthy') {
+            $query->where('stock', '>', 5);
+        }
+
+        $products = (clone $query)->orderBy('stock', 'asc')->paginate(15)->withQueryString();
+
+        // Inventory summary calculations for filtered scope
+        $totalProductsCount = (clone $query)->count();
+        $totalStockUnits = (int) (clone $query)->sum('stock');
+        $totalCostValuation = (float) (clone $query)->sum(DB::raw('stock * price'));
+        $totalRetailValuation = (float) (clone $query)->sum(DB::raw('stock * COALESCE(NULLIF(discounted_price, 0), price)'));
+        $lowStockCount = (int) (clone $query)->where('stock', '>', 0)->where('stock', '<=', 5)->count();
+        $outOfStockCount = (int) (clone $query)->where('stock', '<=', 0)->count();
 
         return view('manager.reports.stock', compact(
-            'products', 'stores', 'storeId', 'status', 'search', 'totalProductsCount',
+            'products', 'mainCategories', 'categories', 'mainCategoryId', 'categoryId',
+            'stores', 'storeId', 'status', 'search', 'totalProductsCount',
             'totalStockUnits', 'totalCostValuation', 'totalRetailValuation',
             'lowStockCount', 'outOfStockCount'
         ));
@@ -512,8 +496,39 @@ class ReportController extends Controller
             abort(403, 'Unauthorized. Profit & Loss Report is restricted to Administrators only.');
         }
 
-        $startDate = $request->input('start_date', now()->startOfMonth()->toDateString());
-        $endDate = $request->input('end_date', now()->toDateString());
+        $preset = $request->input('preset');
+        $startDate = $request->input('start_date');
+        $endDate = $request->input('end_date');
+
+        if (!$startDate && !$endDate) {
+            $startDate = now()->startOfMonth()->toDateString();
+            $endDate = now()->toDateString();
+            if (!$preset) {
+                $preset = 'this_month';
+            }
+        } elseif (!$preset) {
+            $today = now()->toDateString();
+            $yesterday = now()->subDay()->toDateString();
+            $startOfWeek = now()->startOfWeek()->toDateString();
+            $startOfMonth = now()->startOfMonth()->toDateString();
+            $endOfLastMonth = now()->subMonth()->endOfMonth()->toDateString();
+            $startOfLastMonth = now()->subMonth()->startOfMonth()->toDateString();
+            $startOfYear = now()->startOfYear()->toDateString();
+
+            if ($startDate === $today && $endDate === $today) {
+                $preset = 'today';
+            } elseif ($startDate === $yesterday && $endDate === $yesterday) {
+                $preset = 'yesterday';
+            } elseif ($startDate === $startOfWeek && ($endDate === $today || $endDate === now()->endOfWeek()->toDateString())) {
+                $preset = 'this_week';
+            } elseif ($startDate === $startOfMonth && ($endDate === $today || $endDate === now()->endOfMonth()->toDateString())) {
+                $preset = 'this_month';
+            } elseif ($startDate === $startOfLastMonth && $endDate === $endOfLastMonth) {
+                $preset = 'last_month';
+            } elseif ($startDate === $startOfYear && ($endDate === $today || $endDate === now()->endOfYear()->toDateString())) {
+                $preset = 'this_year';
+            }
+        }
 
         // -------------------------------------------------------------
         // A. PRODUCTS PROFIT CALCULATION
@@ -616,8 +631,42 @@ class ReportController extends Controller
         $totalCosts = $totalPurchaseAmount + $totalExpenses + $totalSalariesPaid;
         $profitMargin = $totalRevenue > 0 ? round(($netProfit / $totalRevenue) * 100, 2) : 0;
 
+        // -------------------------------------------------------------
+        // D. AESTHETIC SECTION PROFIT & LOSS SUMMARY
+        // -------------------------------------------------------------
+        $aestheticProdSalesQuery = SaleItem::whereHas('product.category', function ($q) {
+                $q->where('title', 'like', '%Aesthetic%');
+            })
+            ->whereHas('sale', function ($q) use ($startDate, $endDate) {
+                $q->whereBetween('sale_date', [$startDate, $endDate]);
+            });
+        $aestheticProdSalesTotal = (float) (clone $aestheticProdSalesQuery)->sum('subtotal');
+        $aestheticProdSalesCount = (clone $aestheticProdSalesQuery)->count();
+
+        $aestheticServiceSalesQuery = AppointmentService::whereHas('service.category', function ($q) {
+                $q->where('title', 'like', '%Aesthetic%');
+            })
+            ->whereHas('appointment', function ($q) use ($startDate, $endDate) {
+                $q->whereBetween('appointment_date', [$startDate, $endDate])
+                  ->whereNotIn('status', ['cancelled', 'rejected']);
+            });
+        $aestheticServiceSalesTotal = (float) (clone $aestheticServiceSalesQuery)->sum('discounted_price');
+        $aestheticServiceSalesCount = (clone $aestheticServiceSalesQuery)->count();
+
+        $aestheticExpensesQuery = Expense::whereHas('category', function ($q) {
+                $q->where('title', 'like', '%Aesthetic%');
+            })
+            ->whereDate('created_at', '>=', $startDate)
+            ->whereDate('created_at', '<=', $endDate);
+        $aestheticExpensesTotal = (float) (clone $aestheticExpensesQuery)->sum('amount');
+        $aestheticExpensesCount = (clone $aestheticExpensesQuery)->count();
+
+        $aestheticTotalSales = $aestheticProdSalesTotal + $aestheticServiceSalesTotal;
+        $aestheticNetProfit = $aestheticTotalSales - $aestheticExpensesTotal;
+        $aestheticProfitMargin = $aestheticTotalSales > 0 ? round(($aestheticNetProfit / $aestheticTotalSales) * 100, 2) : 0;
+
         return view('manager.reports.profit', compact(
-            'startDate', 'endDate',
+            'startDate', 'endDate', 'preset',
             // Products
             'totalSalesAmount', 'totalSalesDiscount', 'totalSalesNetAmount', 'totalSalesReceived', 'salesCount', 'salesList',
             'totalPurchaseAmount', 'totalPurchasePaid', 'purchasesCount', 'purchasesList',
@@ -628,7 +677,110 @@ class ReportController extends Controller
             'totalSalariesPaid', 'totalPaidPayrollAmount', 'totalAdvancesAmount', 'paidPayrollsList', 'advancesList',
             'servicesProfit',
             // Net
-            'netProfit', 'totalRevenue', 'totalCosts', 'profitMargin'
+            'netProfit', 'totalRevenue', 'totalCosts', 'profitMargin',
+            // Aesthetic Summary
+            'aestheticProdSalesTotal', 'aestheticProdSalesCount',
+            'aestheticServiceSalesTotal', 'aestheticServiceSalesCount',
+            'aestheticExpensesTotal', 'aestheticExpensesCount',
+            'aestheticTotalSales', 'aestheticNetProfit', 'aestheticProfitMargin'
+        ));
+    }
+
+    /**
+     * Dedicated Aesthetic Profit & Loss Report
+     * Calculates Revenue from Aesthetic Product Sales + Aesthetic Service Bookings,
+     * subtracts Aesthetic Category Expenses, and presents Net Profit and Margin.
+     */
+    public function aestheticProfit(Request $request)
+    {
+        if (!auth()->user()->hasRole('admin')) {
+            abort(403, 'Unauthorized. Aesthetic Profit & Loss Report is restricted to Administrators only.');
+        }
+
+        $preset = $request->input('preset');
+        $startDate = $request->input('start_date');
+        $endDate = $request->input('end_date');
+
+        if (!$startDate && !$endDate) {
+            $startDate = now()->startOfMonth()->toDateString();
+            $endDate = now()->toDateString();
+            if (!$preset) {
+                $preset = 'this_month';
+            }
+        } elseif (!$preset) {
+            $today = now()->toDateString();
+            $yesterday = now()->subDay()->toDateString();
+            $startOfWeek = now()->startOfWeek()->toDateString();
+            $startOfMonth = now()->startOfMonth()->toDateString();
+            $endOfLastMonth = now()->subMonth()->endOfMonth()->toDateString();
+            $startOfLastMonth = now()->subMonth()->startOfMonth()->toDateString();
+            $startOfYear = now()->startOfYear()->toDateString();
+
+            if ($startDate === $today && $endDate === $today) {
+                $preset = 'today';
+            } elseif ($startDate === $yesterday && $endDate === $yesterday) {
+                $preset = 'yesterday';
+            } elseif ($startDate === $startOfWeek && ($endDate === $today || $endDate === now()->endOfWeek()->toDateString())) {
+                $preset = 'this_week';
+            } elseif ($startDate === $startOfMonth && ($endDate === $today || $endDate === now()->endOfMonth()->toDateString())) {
+                $preset = 'this_month';
+            } elseif ($startDate === $startOfLastMonth && $endDate === $endOfLastMonth) {
+                $preset = 'last_month';
+            } elseif ($startDate === $startOfYear && ($endDate === $today || $endDate === now()->endOfYear()->toDateString())) {
+                $preset = 'this_year';
+            }
+        }
+
+        // 1. Aesthetic Product Sales
+        $aestheticProdSalesQuery = SaleItem::with(['sale.customer', 'product.category'])
+            ->whereHas('product.category', function ($q) {
+                $q->where('title', 'like', '%Aesthetic%');
+            })
+            ->whereHas('sale', function ($q) use ($startDate, $endDate) {
+                $q->whereBetween('sale_date', [$startDate, $endDate]);
+            });
+        $aestheticProdSalesTotal = (float) (clone $aestheticProdSalesQuery)->sum('subtotal');
+        $aestheticProdSalesCount = (clone $aestheticProdSalesQuery)->count();
+        $aestheticProdSalesList = (clone $aestheticProdSalesQuery)->orderBy('created_at', 'desc')->get();
+
+        // 2. Aesthetic Services Bookings
+        $aestheticServiceSalesQuery = AppointmentService::with(['appointment.customer', 'appointment.employee', 'service.category'])
+            ->whereHas('service.category', function ($q) {
+                $q->where('title', 'like', '%Aesthetic%');
+            })
+            ->whereHas('appointment', function ($q) use ($startDate, $endDate) {
+                $q->whereBetween('appointment_date', [$startDate, $endDate])
+                  ->whereNotIn('status', ['cancelled', 'rejected']);
+            });
+        $aestheticServiceSalesTotal = (float) (clone $aestheticServiceSalesQuery)->sum('discounted_price');
+        $aestheticServiceSalesCount = (clone $aestheticServiceSalesQuery)->count();
+        $aestheticServiceSalesList = (clone $aestheticServiceSalesQuery)->orderBy('created_at', 'desc')->get();
+
+        // 3. Aesthetic Category Expenses
+        $aestheticExpensesQuery = Expense::with(['category', 'creator'])
+            ->whereHas('category', function ($q) {
+                $q->where('title', 'like', '%Aesthetic%');
+            })
+            ->whereDate('created_at', '>=', $startDate)
+            ->whereDate('created_at', '<=', $endDate);
+        $aestheticExpensesTotal = (float) (clone $aestheticExpensesQuery)->sum('amount');
+        $aestheticExpensesCount = (clone $aestheticExpensesQuery)->count();
+        $aestheticExpensesList = (clone $aestheticExpensesQuery)->orderBy('created_at', 'desc')->get();
+
+        // Totals & Net Profit
+        $aestheticTotalSales = $aestheticProdSalesTotal + $aestheticServiceSalesTotal;
+        $aestheticNetProfit = $aestheticTotalSales - $aestheticExpensesTotal;
+        $aestheticProfitMargin = $aestheticTotalSales > 0 ? round(($aestheticNetProfit / $aestheticTotalSales) * 100, 2) : 0;
+
+        $appSetting = \App\Models\Setting::first();
+
+        return view('manager.reports.aesthetic_profit', compact(
+            'startDate', 'endDate', 'preset',
+            'aestheticProdSalesTotal', 'aestheticProdSalesCount', 'aestheticProdSalesList',
+            'aestheticServiceSalesTotal', 'aestheticServiceSalesCount', 'aestheticServiceSalesList',
+            'aestheticExpensesTotal', 'aestheticExpensesCount', 'aestheticExpensesList',
+            'aestheticTotalSales', 'aestheticNetProfit', 'aestheticProfitMargin',
+            'appSetting'
         ));
     }
 
@@ -646,11 +798,42 @@ class ReportController extends Controller
         $date = $request->input('date', now()->toDateString());
 
         // -------------------------------------------------------------
-        // 1. OPENING BALANCE (Set to 0.00 in all cases as required)
+        // 1. SAVED CLOSING RECORD & OPENING BALANCE
         // -------------------------------------------------------------
-        $openingCash = 0.0;
-        $openingBank = 0.0;
-        $totalOpening = 0.0;
+        $dayClosing = DayClosing::with('closedBy')->where('closing_date', $date)->first();
+
+        // Determine Opening Balance for selected date:
+        if ($dayClosing && ($dayClosing->opening_cash > 0 || $dayClosing->opening_bank > 0 || $dayClosing->status !== 'open')) {
+            $openingCash = (float) ($dayClosing->opening_cash ?? 0.0);
+            $openingBank = (float) ($dayClosing->opening_bank ?? 0.0);
+        } else {
+            // Check previous closed day's designated next day opening float
+            $prevClosing = DayClosing::where('closing_date', '<', $date)
+                ->whereIn('status', ['closed', 'verified'])
+                ->orderBy('closing_date', 'desc')
+                ->first();
+
+            if (!$prevClosing) {
+                // If not locked yet, check any prior day closing record
+                $prevClosing = DayClosing::where('closing_date', '<', $date)
+                    ->orderBy('closing_date', 'desc')
+                    ->first();
+            }
+
+            if ($prevClosing) {
+                $openingCash = $prevClosing->next_day_opening_cash !== null
+                    ? (float) $prevClosing->next_day_opening_cash
+                    : (float) ($prevClosing->cash_actual_counted ?? $prevClosing->closing_cash_expected ?? 0.0);
+
+                $openingBank = $prevClosing->next_day_opening_bank !== null
+                    ? (float) $prevClosing->next_day_opening_bank
+                    : (float) ($prevClosing->closing_bank_expected ?? 0.0);
+            } else {
+                $openingCash = 0.0;
+                $openingBank = 0.0;
+            }
+        }
+        $totalOpening = $openingCash + $openingBank;
 
         // -------------------------------------------------------------
         // 2. DAILY RECEIVINGS ON SELECTED DATE (INFLOWS)
@@ -680,7 +863,7 @@ class ReportController extends Controller
         $totalAptReceived = $cashAptTotal + $bankAptTotal;
 
         // Product Sales
-        $allSales = Sale::with(['customer', 'store'])
+        $allSales = Sale::with(['customer', 'store', 'bankAccount'])
             ->where('sale_date', $date)
             ->where('received_amount', '>', 0)
             ->get();
@@ -812,6 +995,7 @@ class ReportController extends Controller
                 'net_flow' => 0.0,
                 'closing_expected' => 0.0,
                 'appointments_count' => 0,
+                'sales_count' => 0,
             ];
         }
 
@@ -841,6 +1025,31 @@ class ReportController extends Controller
             }
         }
 
+        $unassignedSalesReceived = 0.0;
+        $unassignedSalesCount = 0;
+        foreach ($allSales as $s) {
+            $mode = strtolower(trim($s->payment_mode ?? ''));
+            $saleBankAmt = 0.0;
+            if ($mode === 'split' && !empty($s->split_payments)) {
+                $splits = is_array($s->split_payments) ? $s->split_payments : json_decode($s->split_payments, true);
+                $saleBankAmt = (float) (($splits['Bank'] ?? 0) + ($splits['Card'] ?? 0));
+            } elseif (in_array($mode, ['bank', 'card', 'bank transfer', 'online'])) {
+                $saleBankAmt = (float) $s->received_amount;
+            }
+
+            if ($saleBankAmt > 0) {
+                if ($s->bank_account_id && isset($bankBreakdown[$s->bank_account_id])) {
+                    $bankBreakdown[$s->bank_account_id]['received_sales'] += $saleBankAmt;
+                    $bankBreakdown[$s->bank_account_id]['total_received'] += $saleBankAmt;
+                    $bankBreakdown[$s->bank_account_id]['sales_count']++;
+                } else {
+                    $unassignedBankReceived += $saleBankAmt;
+                    $unassignedSalesReceived += $saleBankAmt;
+                    $unassignedSalesCount++;
+                }
+            }
+        }
+
         // Outflows: Advances disbursed through bank
         foreach ($bankAdvances as $adv) {
             $advAmt = (float) $adv->amount;
@@ -863,14 +1072,15 @@ class ReportController extends Controller
                 'branch_name' => '',
                 'iban' => '',
                 'opening' => 0.0,
-                'received_appointments' => $unassignedBankReceived,
-                'received_sales' => 0.0,
+                'received_appointments' => $unassignedBankReceived - $unassignedSalesReceived,
+                'received_sales' => $unassignedSalesReceived,
                 'total_received' => $unassignedBankReceived,
                 'paid_advances' => $unassignedBankPaid,
                 'total_paid' => $unassignedBankPaid,
                 'net_flow' => $unassignedBankReceived - $unassignedBankPaid,
                 'closing_expected' => $unassignedBankReceived - $unassignedBankPaid,
                 'appointments_count' => $unassignedAptCount,
+                'sales_count' => $unassignedSalesCount,
             ];
         }
 
@@ -936,18 +1146,30 @@ class ReportController extends Controller
             'denominations' => ['nullable', 'array'],
             'notes' => ['nullable', 'string', 'max:2000'],
             'status' => ['required', 'in:open,closed,verified'],
+            'next_day_opening_cash' => ['nullable', 'numeric', 'min:0'],
+            'next_day_opening_bank' => ['nullable', 'numeric', 'min:0'],
         ]);
 
         $cashCounted = isset($validated['cash_actual_counted']) ? (float) $validated['cash_actual_counted'] : null;
         $expectedCash = (float) $validated['closing_cash_expected'];
         $diff = $cashCounted !== null ? round($cashCounted - $expectedCash, 2) : null;
 
+        $nextDayOpeningCash = isset($validated['next_day_opening_cash']) && $validated['next_day_opening_cash'] !== '' 
+            ? (float) $validated['next_day_opening_cash'] 
+            : null;
+        $nextDayOpeningBank = isset($validated['next_day_opening_bank']) && $validated['next_day_opening_bank'] !== '' 
+            ? (float) $validated['next_day_opening_bank'] 
+            : null;
+        $nextDayOpeningTotal = ($nextDayOpeningCash !== null || $nextDayOpeningBank !== null)
+            ? (float) (($nextDayOpeningCash ?? 0) + ($nextDayOpeningBank ?? 0))
+            : null;
+
         DayClosing::updateOrCreate(
             ['closing_date' => $validated['closing_date']],
             [
-                'opening_cash' => 0.0,
-                'opening_bank' => 0.0,
-                'total_opening' => 0.0,
+                'opening_cash' => (float) $validated['opening_cash'],
+                'opening_bank' => (float) $validated['opening_bank'],
+                'total_opening' => (float) $validated['total_opening'],
                 'cash_received' => $validated['cash_received'],
                 'bank_received' => $validated['bank_received'],
                 'total_received' => $validated['total_received'],
@@ -967,10 +1189,41 @@ class ReportController extends Controller
                 'closed_by' => auth()->id(),
                 'closed_at' => now(),
                 'notes' => $validated['notes'] ?? null,
+                'next_day_opening_cash' => $nextDayOpeningCash,
+                'next_day_opening_bank' => $nextDayOpeningBank,
+                'next_day_opening_total' => $nextDayOpeningTotal,
             ]
         );
 
+        // Automatically initialize or update next day's opening balance if specified
+        if ($nextDayOpeningCash !== null || $nextDayOpeningBank !== null) {
+            $nextDate = \Carbon\Carbon::parse($validated['closing_date'])->addDay()->toDateString();
+            $nextDayRecord = DayClosing::where('closing_date', $nextDate)->first();
+
+            if (!$nextDayRecord) {
+                DayClosing::create([
+                    'closing_date' => $nextDate,
+                    'opening_cash' => $nextDayOpeningCash ?? 0.0,
+                    'opening_bank' => $nextDayOpeningBank ?? 0.0,
+                    'total_opening' => $nextDayOpeningTotal ?? 0.0,
+                    'status' => 'open',
+                    'notes' => 'Opening balance brought forward from ' . \Carbon\Carbon::parse($validated['closing_date'])->format('d M Y') . ' day closing.',
+                ]);
+            } elseif ($nextDayRecord->status === 'open') {
+                $nextDayRecord->update([
+                    'opening_cash' => $nextDayOpeningCash ?? 0.0,
+                    'opening_bank' => $nextDayOpeningBank ?? 0.0,
+                    'total_opening' => $nextDayOpeningTotal ?? 0.0,
+                ]);
+            }
+        }
+
+        $successMsg = 'Day Closing record saved and locked successfully!';
+        if ($nextDayOpeningCash !== null) {
+            $successMsg .= ' Next day opening balance set to Rs. ' . number_format($nextDayOpeningCash, 2) . '.';
+        }
+
         return redirect()->route('manager.reports.day-closing', ['date' => $validated['closing_date']])
-            ->with('success', 'Day Closing record saved and updated successfully!');
+            ->with('success', $successMsg);
     }
 }

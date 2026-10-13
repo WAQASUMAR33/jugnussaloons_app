@@ -130,6 +130,143 @@ class AppointmentController extends Controller
     }
 
     /**
+     * Display upcoming service bookings and appointments.
+     * Features: Today, Tomorrow, This Week, and All Upcoming tabs,
+     * plus Channel filters (Show All, Site Bookings, POS Bookings).
+     */
+    public function upcoming(Request $request)
+    {
+        $today = now()->toDateString();
+        $tomorrow = now()->addDay()->toDateString();
+        $endOfWeek = now()->endOfWeek()->toDateString();
+
+        $timeFilter = $request->input('time_filter', 'all'); // 'today', 'tomorrow', 'this_week', 'all'
+        $customDate = $request->input('date');
+        $orderType = $request->input('order_type'); // 'Online', 'On Site', or null (all)
+        $search = $request->input('search');
+        $status = $request->input('status');
+        $employeeId = $request->input('employee_id');
+
+        // Base query for upcoming appointments (from today onward)
+        $baseUpcomingQuery = Appointment::whereDate('appointment_date', '>=', $today);
+
+        // Precompute counts for date tabs
+        $todayCount = (clone $baseUpcomingQuery)->whereDate('appointment_date', $today)->count();
+        $tomorrowCount = (clone $baseUpcomingQuery)->whereDate('appointment_date', $tomorrow)->count();
+        $thisWeekCount = (clone $baseUpcomingQuery)->whereBetween('appointment_date', [$today, $endOfWeek])->count();
+        $allUpcomingCount = (clone $baseUpcomingQuery)->count();
+
+        // Precompute counts for channel tabs (Show All, Site Bookings, POS Bookings)
+        $totalUpcomingCount = $allUpcomingCount;
+        $siteUpcomingCount = (clone $baseUpcomingQuery)->where('order_type', 'Online')->count();
+        $posUpcomingCount = (clone $baseUpcomingQuery)->where(function($q) {
+            $q->where('order_type', 'On Site')->orWhereNull('order_type');
+        })->count();
+
+        // Main Query
+        $query = Appointment::with(['customer', 'employee.category', 'rankedBy', 'bankAccount', 'items.service']);
+
+        // Date / Time filter logic
+        if ($customDate) {
+            $query->whereDate('appointment_date', $customDate);
+            $timeFilter = 'custom';
+        } else {
+            if ($timeFilter === 'today') {
+                $query->whereDate('appointment_date', $today);
+            } elseif ($timeFilter === 'tomorrow') {
+                $query->whereDate('appointment_date', $tomorrow);
+            } elseif ($timeFilter === 'this_week') {
+                $query->whereBetween('appointment_date', [$today, $endOfWeek]);
+            } else {
+                $query->whereDate('appointment_date', '>=', $today);
+                $timeFilter = 'all';
+            }
+        }
+
+        // Channel filter (Show All, Site Bookings, POS Bookings)
+        if ($orderType === 'Online') {
+            $query->where('order_type', 'Online');
+        } elseif ($orderType === 'On Site') {
+            $query->where(function($q) {
+                $q->where('order_type', 'On Site')->orWhereNull('order_type');
+            });
+        }
+
+        // Search
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('booking_no', 'like', "%{$search}%")
+                  ->orWhereHas('customer', function ($cq) use ($search) {
+                      $cq->where('name', 'like', "%{$search}%")
+                        ->orWhere('phone_no1', 'like', "%{$search}%");
+                  })
+                  ->orWhereHas('employee', function ($eq) use ($search) {
+                      $eq->where('name', 'like', "%{$search}%");
+                  });
+            });
+        }
+
+        // Status
+        if ($status) {
+            $query->where('status', $status);
+        }
+
+        // Stylist / Staff
+        if ($employeeId) {
+            $query->where('employee_id', $employeeId);
+        }
+
+        // Chronological order: nearest appointments first
+        $appointments = $query->orderBy('appointment_date', 'asc')
+            ->orderBy('start_time', 'asc')
+            ->orderBy('id', 'asc')
+            ->paginate(15)
+            ->withQueryString();
+
+        // Fetch Staff / Employee Accounts for Filter Dropdown
+        $employees = Account::where(function($q) {
+            $q->whereHas('category', function ($cq) {
+                $cq->where('title', 'like', '%Employee%')
+                   ->orWhere('title', 'like', '%Staff%')
+                   ->orWhere('title', 'like', '%Stylist%')
+                   ->orWhere('title', 'like', '%Barber%');
+            })->orWhere(function($sq) {
+                $sq->whereNotNull('emp_type')->where('emp_type', '!=', '');
+            });
+        })->with('category')->orderBy('name')->get();
+
+        if ($employees->isEmpty()) {
+            $employees = Account::whereHas('category', function ($q) {
+                $q->where('title', 'not like', '%Supplier%')
+                  ->where('title', 'not like', '%Vendor%');
+            })->orWhereDoesntHave('category')->with('category')->orderBy('name')->get();
+        }
+
+        $bankAccounts = \App\Models\BankAccount::where('is_active', true)->orderBy('bank_name')->get();
+        $brandSettings = \App\Models\Setting::getSettings();
+
+        return view('manager.appointments.upcoming', compact(
+            'appointments',
+            'timeFilter',
+            'customDate',
+            'orderType',
+            'search',
+            'status',
+            'employeeId',
+            'employees',
+            'bankAccounts',
+            'brandSettings',
+            'todayCount',
+            'tomorrowCount',
+            'thisWeekCount',
+            'allUpcomingCount',
+            'totalUpcomingCount',
+            'siteUpcomingCount',
+            'posUpcomingCount'
+        ));
+    }
+
+    /**
      * Show the dedicated New Bill / Service POS checkout terminal.
      */
     public function create(Request $request)

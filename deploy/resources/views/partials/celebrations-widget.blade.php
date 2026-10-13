@@ -15,9 +15,24 @@
         this.copySuccess = false;
         this.messageModalOpen = true;
     },
+    formatWhatsAppNumber(phone) {
+        if (!phone) return '';
+        let digits = phone.replace(/[^0-9]/g, '');
+        if (!digits) return '';
+        if (digits.startsWith('00')) {
+            digits = digits.substring(2);
+        }
+        if (digits.startsWith('0')) {
+            digits = '92' + digits.replace(/^0+/, '');
+        } else if (digits.length === 10 && digits.startsWith('3')) {
+            digits = '92' + digits;
+        }
+        return digits;
+    },
     sendWhatsApp() {
         if (!this.modalClientPhone) return;
-        const clean = this.modalClientPhone.replace(/[^0-9]/g, '');
+        const clean = this.formatWhatsAppNumber(this.modalClientPhone);
+        if (!clean) return;
         const encoded = encodeURIComponent(this.modalMessage);
         window.open(`https://wa.me/${clean}?text=${encoded}`, '_blank');
         this.messageModalOpen = false;
@@ -117,9 +132,10 @@
                     {{-- Today's Birthdays --}}
                     @foreach($todayBirthdays as $user)
                         @php
-                            $cleanPhone = preg_replace('/[^0-9]/', '', $user->phone_no1);
+                            $cleanPhone = \App\Services\CelebrationService::formatWhatsAppPhone($user->phone_no1);
                             $age = $user->turning_age ?: ($user->date_of_birth ? now()->year - $user->date_of_birth->year : null);
                             $bdayMsg = $user->birthday_wishing_message ?? "Happy Birthday {$user->name}! 🎂🎉 Wishing you a wonderful day from the team at Jugnu Saloon.";
+                            $bdayUrl = $user->birthday_whatsapp_url ?? \App\Services\CelebrationService::buildWhatsAppUrl($user->phone_no1, $bdayMsg);
                         @endphp
                         <div class="p-4 rounded-xl border-2 border-amber-300/80 bg-gradient-to-br from-amber-50/80 to-white flex flex-col justify-between gap-3 shadow-xs hover:shadow-md transition-all">
                             <div class="flex items-start justify-between gap-3">
@@ -155,8 +171,8 @@
                             </div>
 
                             <div class="flex items-center gap-2 pt-2 border-t border-amber-200/60">
-                                @if($cleanPhone)
-                                    <a href="{{ $user->birthday_whatsapp_url }}" target="_blank" 
+                                @if($cleanPhone && $bdayUrl)
+                                    <a href="{{ $bdayUrl }}" target="_blank" 
                                        class="flex-1 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5 shadow-2xs">
                                         <span>💬 Send Birthday Wish</span>
                                     </a>
@@ -169,7 +185,7 @@
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path></svg>
                                     </a>
                                 @else
-                                    <span class="text-xs text-slate-400 italic">No contact number available</span>
+                                    <span class="text-xs text-slate-400 italic">No valid phone number available</span>
                                 @endif
                             </div>
                         </div>
@@ -178,9 +194,10 @@
                     {{-- Today's Marriage Anniversaries --}}
                     @foreach($todayAnniversaries as $user)
                         @php
-                            $cleanPhone = preg_replace('/[^0-9]/', '', $user->phone_no1);
+                            $cleanPhone = \App\Services\CelebrationService::formatWhatsAppPhone($user->phone_no1);
                             $years = $user->anniversary_years ?: ($user->date_of_anniversary ? now()->year - $user->date_of_anniversary->year : null);
                             $annivMsg = $user->anniversary_wishing_message ?? "Happy Marriage Anniversary {$user->name}! 💍✨ Wishing you both endless joy and love from Jugnu Saloon.";
+                            $annivUrl = $user->anniversary_whatsapp_url ?? \App\Services\CelebrationService::buildWhatsAppUrl($user->phone_no1, $annivMsg);
                         @endphp
                         <div class="p-4 rounded-xl border-2 border-rose-300/80 bg-gradient-to-br from-rose-50/80 to-white flex flex-col justify-between gap-3 shadow-xs hover:shadow-md transition-all">
                             <div class="flex items-start justify-between gap-3">
@@ -216,8 +233,8 @@
                             </div>
 
                             <div class="flex items-center gap-2 pt-2 border-t border-rose-200/60">
-                                @if($cleanPhone)
-                                    <a href="{{ $user->anniversary_whatsapp_url }}" target="_blank" 
+                                @if($cleanPhone && $annivUrl)
+                                    <a href="{{ $annivUrl }}" target="_blank" 
                                        class="flex-1 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5 shadow-2xs">
                                         <span>💬 Send Marriage Ceremony Wish</span>
                                     </a>
@@ -230,7 +247,7 @@
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path></svg>
                                     </a>
                                 @else
-                                    <span class="text-xs text-slate-400 italic">No contact number available</span>
+                                    <span class="text-xs text-slate-400 italic">No valid phone number available</span>
                                 @endif
                             </div>
                         </div>
@@ -273,10 +290,11 @@
                     @foreach($upcomingItems as $item)
                         @php
                             $user = $item['account'];
-                            $cleanPhone = preg_replace('/[^0-9]/', '', $user->phone_no1);
+                            $cleanPhone = \App\Services\CelebrationService::formatWhatsAppPhone($user->phone_no1);
                             $isBday = $item['type'] === 'birthday';
                             $msgTitle = $isBday ? 'Birthday' : 'Marriage Ceremony';
                             $earlyMsg = $item['wishing_message'] ?? ($isBday ? $user->birthday_wishing_message : $user->anniversary_wishing_message);
+                            $earlyUrl = $item['whatsapp_url'] ?? \App\Services\CelebrationService::buildWhatsAppUrl($user->phone_no1, $earlyMsg);
                         @endphp
                         <div class="p-4 rounded-xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-xs transition-all flex flex-col justify-between gap-3">
                             <div class="flex items-start justify-between gap-2">
@@ -302,9 +320,9 @@
 
                             <div class="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
                                 <span class="text-[11px] text-slate-500 truncate">{{ $user->phone_no1 ?: 'No phone' }}</span>
-                                @if($cleanPhone)
+                                @if($cleanPhone && $earlyUrl)
                                     <div class="flex items-center gap-1.5">
-                                        <a href="{{ $item['whatsapp_url'] ?? "https://wa.me/{$cleanPhone}?text=" . rawurlencode($earlyMsg) }}" target="_blank" 
+                                        <a href="{{ $earlyUrl }}" target="_blank" 
                                            class="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1 shrink-0 transition-colors">
                                             <span>💬 Send Wish</span>
                                         </a>
@@ -338,9 +356,10 @@
                     {{-- Birthdays this month --}}
                     @foreach($monthBirthdays as $user)
                         @php
-                            $cleanPhone = preg_replace('/[^0-9]/', '', $user->phone_no1);
+                            $cleanPhone = \App\Services\CelebrationService::formatWhatsAppPhone($user->phone_no1);
                             $bdayDay = Carbon\Carbon::parse($user->date_of_birth)->format('M d');
                             $bdayMsg = $user->birthday_wishing_message ?? "Happy Birthday {$user->name}! 🎂 Wishing you a wonderful celebration from Jugnu Saloon.";
+                            $bdayUrl = $user->birthday_whatsapp_url ?? \App\Services\CelebrationService::buildWhatsAppUrl($user->phone_no1, $bdayMsg);
                         @endphp
                         <div class="p-3.5 rounded-xl border border-amber-200 bg-amber-50/30 flex items-center justify-between gap-2">
                             <div class="flex items-center gap-2.5">
@@ -350,9 +369,9 @@
                                     <p class="text-[11px] text-amber-800 font-bold">Birthdate: {{ $bdayDay }}</p>
                                 </div>
                             </div>
-                            @if($cleanPhone)
+                            @if($cleanPhone && $bdayUrl)
                                 <div class="flex items-center gap-1">
-                                    <a href="{{ $user->birthday_whatsapp_url ?? "https://wa.me/{$cleanPhone}?text=" . rawurlencode($bdayMsg) }}" target="_blank" 
+                                    <a href="{{ $bdayUrl }}" target="_blank" 
                                        class="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition-colors flex items-center gap-1" title="Send Birthday Wish">
                                         <span>💬 Wish</span>
                                     </a>
@@ -364,9 +383,10 @@
                     {{-- Anniversaries this month --}}
                     @foreach($monthAnniversaries as $user)
                         @php
-                            $cleanPhone = preg_replace('/[^0-9]/', '', $user->phone_no1);
+                            $cleanPhone = \App\Services\CelebrationService::formatWhatsAppPhone($user->phone_no1);
                             $annivDay = Carbon\Carbon::parse($user->date_of_anniversary)->format('M d');
                             $annivMsg = $user->anniversary_wishing_message ?? "Happy Marriage Anniversary {$user->name}! 💍 Wishing you both endless joy from Jugnu Saloon.";
+                            $annivUrl = $user->anniversary_whatsapp_url ?? \App\Services\CelebrationService::buildWhatsAppUrl($user->phone_no1, $annivMsg);
                         @endphp
                         <div class="p-3.5 rounded-xl border border-rose-200 bg-rose-50/30 flex items-center justify-between gap-2">
                             <div class="flex items-center gap-2.5">
@@ -376,9 +396,9 @@
                                     <p class="text-[11px] text-rose-800 font-bold">Marriage: {{ $annivDay }}</p>
                                 </div>
                             </div>
-                            @if($cleanPhone)
+                            @if($cleanPhone && $annivUrl)
                                 <div class="flex items-center gap-1">
-                                    <a href="{{ $user->anniversary_whatsapp_url ?? "https://wa.me/{$cleanPhone}?text=" . rawurlencode($annivMsg) }}" target="_blank" 
+                                    <a href="{{ $annivUrl }}" target="_blank" 
                                        class="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition-colors flex items-center gap-1" title="Send Marriage Ceremony Wish">
                                         <span>💬 Wish</span>
                                     </a>
@@ -390,7 +410,7 @@
             @else
                 <div class="py-8 text-center bg-slate-50/60 rounded-xl border border-dashed border-slate-200 p-6 space-y-2">
                     <p class="text-sm font-bold text-slate-700">No client celebrations in {{ now()->format('F') }}</p>
-                    <p class="text-xs text-slate-400">Add birthdates and marriage ceremony dates to client profiles in Customer Accounts.</p>
+                    <p class="text-xs text-slate-400">Add birthdates and marriage ceremony dates to client profiles in Account Management.</p>
                 </div>
             @endif
         </div>
@@ -426,8 +446,12 @@
                         <tbody class="divide-y divide-slate-100">
                             @foreach($allCelebrants as $user)
                                 @php
-                                    $cleanPhone = preg_replace('/[^0-9]/', '', $user->phone_no1);
+                                    $cleanPhone = \App\Services\CelebrationService::formatWhatsAppPhone($user->phone_no1);
                                     $userSearchStr = strtolower($user->name . ' ' . $user->phone_no1 . ' ' . ($user->category->title ?? ''));
+                                    $bdayMsg = $user->birthday_wishing_message ?? "Happy Birthday {$user->name}! 🎂 Wishing you a wonderful day from Jugnu Saloon.";
+                                    $annivMsg = $user->anniversary_wishing_message ?? "Happy Marriage Anniversary {$user->name}! 💍 Wishing you both endless happiness from Jugnu Saloon.";
+                                    $userBdayUrl = $user->birthday_whatsapp_url ?? \App\Services\CelebrationService::buildWhatsAppUrl($user->phone_no1, $bdayMsg);
+                                    $userAnnivUrl = $user->anniversary_whatsapp_url ?? \App\Services\CelebrationService::buildWhatsAppUrl($user->phone_no1, $annivMsg);
                                 @endphp
                                 <tr x-show="!searchCelebrant || '{{ addslashes($userSearchStr) }}'.includes(searchCelebrant.toLowerCase())" 
                                     class="hover:bg-slate-50 transition-colors">
@@ -491,8 +515,8 @@
                                         <div class="flex items-center justify-end gap-1.5 flex-wrap">
                                             @if($cleanPhone)
                                                 {{-- Send Birthday Wish Button --}}
-                                                @if($user->date_of_birth)
-                                                    <a href="{{ $user->birthday_whatsapp_url }}" target="_blank" 
+                                                @if($user->date_of_birth && $userBdayUrl)
+                                                    <a href="{{ $userBdayUrl }}" target="_blank" 
                                                        class="px-2 py-1 rounded bg-amber-50 hover:bg-amber-100 text-amber-900 text-[11px] font-bold border border-amber-200 transition-colors flex items-center gap-1"
                                                        title="Send Birthday Wishing Message">
                                                         <span>🎂 Birthday Wish</span>
@@ -500,8 +524,8 @@
                                                 @endif
 
                                                 {{-- Send Marriage Ceremony Wish Button --}}
-                                                @if($user->date_of_anniversary)
-                                                    <a href="{{ $user->anniversary_whatsapp_url }}" target="_blank" 
+                                                @if($user->date_of_anniversary && $userAnnivUrl)
+                                                    <a href="{{ $userAnnivUrl }}" target="_blank" 
                                                        class="px-2 py-1 rounded bg-rose-50 hover:bg-rose-100 text-rose-900 text-[11px] font-bold border border-rose-200 transition-colors flex items-center gap-1"
                                                        title="Send Marriage Ceremony Wishing Message">
                                                         <span>💍 Marriage Wish</span>
@@ -527,12 +551,12 @@
                     <div>
                         <h4 class="text-sm font-extrabold text-slate-800">No client celebration dates recorded yet</h4>
                         <p class="text-xs text-slate-500 max-w-md mx-auto mt-1">
-                            Add client birthdates and marriage ceremony dates in the Customer Accounts module to celebrate milestones and build loyalty!
+                            Add client birthdates and marriage ceremony dates in the Account Management module to celebrate milestones and build loyalty!
                         </p>
                     </div>
                     <a href="{{ route('manager.accounts.index') }}" 
                        class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-colors shadow-2xs">
-                        <span>+ Open Customer Accounts</span>
+                        <span>+ Open Account Management</span>
                     </a>
                 </div>
             @endif

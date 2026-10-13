@@ -105,6 +105,7 @@ function appointmentHistory() {
         },
 
         rateModalOpen: false,
+        isSubmitting: false,
         ratingApt: null,
         ratingScore: 5,
         ratingNotes: '',
@@ -297,6 +298,11 @@ function appointmentHistory() {
                    class="px-4 py-2 text-xs rounded-none transition-all flex items-center gap-2 text-slate-600 hover:text-slate-900 font-bold">
                     <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                     <span>New Bill Terminal</span>
+                </a>
+                <a href="{{ route('manager.appointments.upcoming') }}" 
+                   class="px-4 py-2 text-xs rounded-none transition-all flex items-center gap-2 text-slate-600 hover:text-slate-900 font-bold">
+                    <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    <span>Upcoming Bookings</span>
                 </a>
                 <a href="{{ route('manager.appointments.index') }}" 
                    class="px-4 py-2 text-xs rounded-none transition-all flex items-center gap-2 bg-white text-indigo-700 shadow-sm font-black">
@@ -767,7 +773,7 @@ function appointmentHistory() {
                 </div>
 
                 <template x-if="ratingApt">
-                    <form method="POST" :action="'/manager/appointments/' + ratingApt.id + '/rate'" class="space-y-4">
+                    <form method="POST" :action="'/manager/appointments/' + ratingApt.id + '/rate'" @submit="if(isSubmitting) { $event.preventDefault(); return false; } isSubmitting = true" class="space-y-4">
                         @csrf
                         
                         <!-- Booking Summary Header -->
@@ -831,9 +837,15 @@ function appointmentHistory() {
                                     class="px-4 py-2 bg-slate-100 text-slate-700 font-bold text-xs hover:bg-slate-200">
                                 Cancel
                             </button>
-                            <button type="submit" 
-                                    class="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-black text-xs shadow-xs transition-colors">
-                                Save Staff Ranking
+                            <button type="submit" :disabled="isSubmitting"
+                                    class="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-black text-xs shadow-xs transition-colors flex items-center gap-1.5 disabled:opacity-70 disabled:cursor-not-allowed">
+                                <template x-if="isSubmitting">
+                                    <svg class="animate-spin w-3.5 h-3.5 text-white shrink-0" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                    </svg>
+                                </template>
+                                <span x-text="isSubmitting ? 'Saving...' : 'Save Staff Ranking'"></span>
                             </button>
                         </div>
                     </form>

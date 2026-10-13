@@ -27,6 +27,8 @@ class Payroll extends Model
         'status',
         'payment_date',
         'notes',
+        'generated_by',
+        'generated_date',
     ];
 
     protected $casts = [
@@ -38,7 +40,45 @@ class Payroll extends Model
         'advance_salary' => 'decimal:2',
         'net_salary' => 'decimal:2',
         'payment_date' => 'date',
+        'generated_date' => 'datetime',
     ];
+
+    protected $appends = [
+        'generated_by_name',
+        'generated_date_formatted',
+    ];
+
+    /**
+     * User who generated this payroll record.
+     */
+    public function generator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'generated_by');
+    }
+
+    /**
+     * Get the name of the user who generated this payroll.
+     */
+    public function getGeneratedByNameAttribute(): string
+    {
+        if ($this->relationLoaded('generator') && $this->generator) {
+            return $this->generator->name;
+        }
+        if ($this->generated_by) {
+            $user = User::find($this->generated_by);
+            if ($user) return $user->name;
+        }
+        return 'System Admin';
+    }
+
+    /**
+     * Get formatted generated date.
+     */
+    public function getGeneratedDateFormattedAttribute(): string
+    {
+        $dt = $this->generated_date ?? $this->created_at;
+        return $dt ? $dt->format('d M, Y h:i A') : 'N/A';
+    }
 
     /**
      * Employee account relationship.

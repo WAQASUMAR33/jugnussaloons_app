@@ -17,6 +17,10 @@ class StockTransfer extends Model
         'source_store_id',
         'destination_store_id',
         'product_id',
+        'source_main_category_id',
+        'destination_main_category_id',
+        'source_category_id',
+        'destination_category_id',
         'quantity',
         'transfer_date',
         'notes',
@@ -27,6 +31,26 @@ class StockTransfer extends Model
         'quantity' => 'integer',
         'transfer_date' => 'date',
     ];
+
+    public function sourceMainCategory(): BelongsTo
+    {
+        return $this->belongsTo(ProductMainCategory::class, 'source_main_category_id');
+    }
+
+    public function destinationMainCategory(): BelongsTo
+    {
+        return $this->belongsTo(ProductMainCategory::class, 'destination_main_category_id');
+    }
+
+    public function sourceCategory(): BelongsTo
+    {
+        return $this->belongsTo(ProductCategory::class, 'source_category_id');
+    }
+
+    public function destinationCategory(): BelongsTo
+    {
+        return $this->belongsTo(ProductCategory::class, 'destination_category_id');
+    }
 
     public function sourceStore(): BelongsTo
     {

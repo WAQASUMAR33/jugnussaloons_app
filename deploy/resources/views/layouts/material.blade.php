@@ -528,6 +528,21 @@
                             History
                         </span>
                     </a>
+
+                    <!-- Appointments: Upcoming Bookings -->
+                    <a href="{{ route('manager.appointments.upcoming') }}" 
+                       x-show="!menuQuery || 'upcoming bookings appointments schedule today tomorrow pos site live future'.includes(menuQuery.toLowerCase())"
+                       class="flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 group {{ request()->routeIs('manager.appointments.upcoming') ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100 font-extrabold' : 'text-slate-700 hover:bg-slate-100 hover:text-indigo-600' }}">
+                        <div class="flex items-center gap-3">
+                            <div class="p-1.5 rounded-lg {{ request()->routeIs('manager.appointments.upcoming') ? 'bg-white/20 text-white' : 'bg-sky-50 text-sky-600 group-hover:scale-105' }} transition-transform">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                            </div>
+                            <span>Upcoming Bookings</span>
+                        </div>
+                        <span class="px-1.5 py-0.5 rounded-md text-[10px] font-black {{ request()->routeIs('manager.appointments.upcoming') ? 'bg-white/20 text-white' : 'bg-sky-100 text-sky-800' }}">
+                            Upcoming
+                        </span>
+                    </a>
                     @endif
 
                     <!-- Staff Feedback & Ratings -->
@@ -672,9 +687,9 @@
                         @if(Auth::user()->hasRole('admin') || Auth::user()->hasPermission('manage-product-categories') || Auth::user()->hasPermission('manage-products'))
                         <a href="{{ route('manager.product-categories.index') }}" 
                            x-show="!menuQuery || $el.innerText.toLowerCase().includes(menuQuery.toLowerCase())"
-                           class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all {{ request()->routeIs('manager.product-categories.*') ? 'bg-indigo-600 text-white font-extrabold shadow-sm' : 'text-slate-600 hover:text-indigo-600 hover:bg-indigo-50/70' }}">
-                            <span class="w-1.5 h-1.5 rounded-full {{ request()->routeIs('manager.product-categories.*') ? 'bg-white' : 'bg-slate-300' }}"></span>
-                            <span>Product Categories</span>
+                           class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all {{ (request()->routeIs('manager.product-categories.*') || request()->routeIs('manager.product-main-categories.*')) ? 'bg-indigo-600 text-white font-extrabold shadow-sm' : 'text-slate-600 hover:text-indigo-600 hover:bg-indigo-50/70' }}">
+                            <span class="w-1.5 h-1.5 rounded-full {{ (request()->routeIs('manager.product-categories.*') || request()->routeIs('manager.product-main-categories.*')) ? 'bg-white' : 'bg-slate-300' }}"></span>
+                            <span>Main & Sub Categories</span>
                         </a>
                         @endif
 
@@ -687,30 +702,12 @@
                         </a>
                         @endif
 
-                        @if(Auth::user()->hasRole('admin') || Auth::user()->hasPermission('manage-stores'))
-                        <a href="{{ route('manager.stores.index') }}" 
-                           x-show="!menuQuery || $el.innerText.toLowerCase().includes(menuQuery.toLowerCase())"
-                           class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all {{ request()->routeIs('manager.stores.*') ? 'bg-indigo-600 text-white font-extrabold shadow-sm' : 'text-slate-600 hover:text-indigo-600 hover:bg-indigo-50/70' }}">
-                            <span class="w-1.5 h-1.5 rounded-full {{ request()->routeIs('manager.stores.*') ? 'bg-white' : 'bg-slate-300' }}"></span>
-                            <span>Store Locations / Branches</span>
-                        </a>
-                        @endif
-
-                        @if(Auth::user()->hasRole('admin') || Auth::user()->hasPermission('manage-store-stocks'))
-                        <a href="{{ route('manager.store-stocks.index') }}" 
-                           x-show="!menuQuery || $el.innerText.toLowerCase().includes(menuQuery.toLowerCase())"
-                           class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all {{ request()->routeIs('manager.store-stocks.*') ? 'bg-indigo-600 text-white font-extrabold shadow-sm' : 'text-slate-600 hover:text-indigo-600 hover:bg-indigo-50/70' }}">
-                            <span class="w-1.5 h-1.5 rounded-full {{ request()->routeIs('manager.store-stocks.*') ? 'bg-white' : 'bg-slate-300' }}"></span>
-                            <span>Store-Wise Stock Ledger</span>
-                        </a>
-                        @endif
-
                         @if(Auth::user()->hasRole('admin') || Auth::user()->hasPermission('manage-stock-transfers'))
                         <a href="{{ route('manager.stock-transfers.index') }}" 
                            x-show="!menuQuery || $el.innerText.toLowerCase().includes(menuQuery.toLowerCase())"
                            class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all {{ request()->routeIs('manager.stock-transfers.*') ? 'bg-indigo-600 text-white font-extrabold shadow-sm' : 'text-slate-600 hover:text-indigo-600 hover:bg-indigo-50/70' }}">
                             <span class="w-1.5 h-1.5 rounded-full {{ request()->routeIs('manager.stock-transfers.*') ? 'bg-white' : 'bg-slate-300' }}"></span>
-                            <span>Stock Transfers</span>
+                            <span>Category Transfers</span>
                         </a>
                         @endif
                     </div>
@@ -740,7 +737,7 @@
                            x-show="!menuQuery || $el.innerText.toLowerCase().includes(menuQuery.toLowerCase())"
                            class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all {{ request()->routeIs('manager.accounts.*') ? 'bg-indigo-600 text-white font-extrabold shadow-sm' : 'text-slate-600 hover:text-indigo-600 hover:bg-indigo-50/70' }}">
                             <span class="w-1.5 h-1.5 rounded-full {{ request()->routeIs('manager.accounts.*') ? 'bg-white' : 'bg-slate-300' }}"></span>
-                            <span>Customer Accounts</span>
+                            <span>Account Management</span>
                         </a>
                         @endif
 
@@ -895,6 +892,13 @@
                            class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all {{ request()->routeIs('manager.reports.profit') ? 'bg-emerald-600 text-white font-extrabold shadow-sm' : 'text-slate-600 hover:text-emerald-600 hover:bg-emerald-50/70' }}">
                             <span class="w-1.5 h-1.5 rounded-full {{ request()->routeIs('manager.reports.profit') ? 'bg-white' : 'bg-slate-300' }}"></span>
                             <span>Profit & Loss Report</span>
+                        </a>
+
+                        <a href="{{ route('manager.reports.aesthetic-profit') }}" 
+                           x-show="!menuQuery || $el.innerText.toLowerCase().includes(menuQuery.toLowerCase())"
+                           class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all {{ request()->routeIs('manager.reports.aesthetic-profit') ? 'bg-rose-600 text-white font-extrabold shadow-sm' : 'text-slate-600 hover:text-rose-600 hover:bg-rose-50/70' }}">
+                            <span class="w-1.5 h-1.5 rounded-full {{ request()->routeIs('manager.reports.aesthetic-profit') ? 'bg-white' : 'bg-slate-300' }}"></span>
+                            <span>Aesthetic Profit Report</span>
                         </a>
                         @endif
 

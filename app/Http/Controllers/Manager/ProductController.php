@@ -5,34 +5,32 @@ namespace App\Http\Controllers\Manager;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Models\ProductMainCategory;
 use App\Models\ProductStoreStock;
 use App\Models\Store;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use App\Services\ImageUploadService;
 
 class ProductController extends Controller
 {
     /**
-     * Display a listing of products with multi-store stock breakdown.
+     * Display a listing of products with dynamic main category & sub category filters.
      */
     public function index(Request $request)
     {
         $search = $request->input('search');
-        $selectedStoreId = $request->input('store_id');
+        $selectedMainCategoryId = $request->input('main_category_id');
         $selectedCategoryId = $request->input('category_id');
 
-        $query = Product::with(['storeStocks.store', 'category']);
+        $query = Product::with(['mainCategory', 'category']);
 
         if ($search) {
             $query->where('title', 'like', "%{$search}%");
         }
 
-        if ($selectedStoreId) {
-            $query->whereHas('storeStocks', function ($q) use ($selectedStoreId) {
-                $q->where('store_id', $selectedStoreId);
-            });
+        if ($selectedMainCategoryId) {
+            $query->where('product_main_category_id', $selectedMainCategoryId);
         }
 
         if ($selectedCategoryId) {
@@ -40,20 +38,32 @@ class ProductController extends Controller
         }
 
         $products = $query->orderBy('created_at', 'desc')->paginate(12)->withQueryString();
-        $stores = Store::where('is_active', true)->orderBy('is_default', 'desc')->orderBy('name')->get();
-        $categories = ProductCategory::orderBy('title')->get();
+        
+        $mainCategories = ProductMainCategory::where('is_active', true)->orderBy('title')->get();
+        $categories = ProductCategory::with('mainCategory')->orderBy('title')->get();
         
         $lowStockCount = Product::whereColumn('stock', '<=', 'low_stock')->count();
+        $totalStockCount = Product::sum('stock');
 
-        return view('manager.products.index', compact('products', 'search', 'stores', 'selectedStoreId', 'categories', 'selectedCategoryId', 'lowStockCount'));
+        return view('manager.products.index', compact(
+            'products', 
+            'search', 
+            'mainCategories', 
+            'selectedMainCategoryId', 
+            'categories', 
+            'selectedCategoryId', 
+            'lowStockCount',
+            'totalStockCount'
+        ));
     }
 
     /**
-     * Store a newly created product with multi-store stock allocation.
+     * Store a newly created product with main category & sub category allocation.
      */
     public function store(Request $request)
     {
         $validated = $request->validate([
+            'product_main_category_id' => ['required', 'exists:product_main_categories,id'],
             'product_category_id' => ['nullable', 'exists:product_categories,id'],
             'title' => ['required', 'string', 'max:255'],
             'price' => ['required', 'numeric', 'min:0'],
@@ -61,8 +71,6 @@ class ProductController extends Controller
             'discounted_price' => ['nullable', 'numeric', 'min:0'],
             'stock' => ['nullable', 'integer', 'min:0'],
             'low_stock' => ['nullable', 'integer', 'min:0'],
-            'store_stocks' => ['nullable', 'array'],
-            'store_stocks.*' => ['nullable', 'integer', 'min:0'],
             'image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,gif,webp,avif', 'max:10240'],
         ]);
 
@@ -79,7 +87,7 @@ class ProductController extends Controller
             ->first();
         if ($recentDuplicate) {
             return redirect()->route('manager.products.index')
-                ->with('success', "Product '{$recentDuplicate->title}' created successfully with store stock allocation!");
+                ->with('success', "Product '{$recentDuplicate->title}' created successfully!");
         }
 
         $imagePath = null;
@@ -88,66 +96,46 @@ class ProductController extends Controller
         }
 
         $defaultLowStock = isset($validated['low_stock']) ? (int) $validated['low_stock'] : 5;
+        $initialStock = isset($validated['stock']) ? max(0, (int) $validated['stock']) : 0;
 
-        $product = DB::transaction(function () use ($validated, $price, $discount, $discountedPrice, $defaultLowStock, $imagePath) {
+        $product = DB::transaction(function () use ($validated, $price, $discount, $discountedPrice, $defaultLowStock, $initialStock, $imagePath) {
             $product = Product::create([
+                'product_main_category_id' => $validated['product_main_category_id'],
                 'product_category_id' => $validated['product_category_id'] ?? null,
                 'title' => $validated['title'],
                 'price' => $price,
                 'discount' => $discount,
                 'discounted_price' => $discountedPrice,
-                'stock' => 0, // Calculated from store stocks
+                'stock' => $initialStock,
                 'low_stock' => $defaultLowStock,
                 'image' => $imagePath,
             ]);
 
-            // Allocate stocks to stores
-            $allStores = Store::all();
-            $defaultStore = Store::getDefaultStore();
-
-            if (!empty($validated['store_stocks'])) {
-                foreach ($validated['store_stocks'] as $storeId => $qty) {
-                    ProductStoreStock::create([
-                        'product_id' => $product->id,
-                        'store_id' => (int) $storeId,
-                        'stock' => max(0, (int) $qty),
-                        'low_stock' => $defaultLowStock,
-                    ]);
+            // Sync with default store stock for backward compatibility
+            try {
+                $defaultStore = Store::getDefaultStore();
+                if ($defaultStore) {
+                    ProductStoreStock::updateOrCreate(
+                        ['product_id' => $product->id, 'store_id' => $defaultStore->id],
+                        ['stock' => $initialStock, 'low_stock' => $defaultLowStock]
+                    );
                 }
-            } else {
-                // Assign entered stock to default store
-                $initialStock = isset($validated['stock']) ? (int) $validated['stock'] : 0;
-                ProductStoreStock::create([
-                    'product_id' => $product->id,
-                    'store_id' => $defaultStore->id,
-                    'stock' => $initialStock,
-                    'low_stock' => $defaultLowStock,
-                ]);
-            }
-
-            // Initialize zero entries for remaining stores
-            foreach ($allStores as $s) {
-                ProductStoreStock::firstOrCreate(
-                    ['product_id' => $product->id, 'store_id' => $s->id],
-                    ['stock' => 0, 'low_stock' => $defaultLowStock]
-                );
-            }
-
-            $product->syncTotalStock();
+            } catch (\Throwable $e) {}
 
             return $product;
         });
 
         return redirect()->route('manager.products.index')
-            ->with('success', "Product '{$product->title}' created successfully with store stock allocation!");
+            ->with('success', "Product '{$product->title}' created successfully in '{$product->mainCategory?->title}'!");
     }
 
     /**
-     * Update the specified product and store stock allocations.
+     * Update the specified product.
      */
     public function update(Request $request, Product $product)
     {
         $validated = $request->validate([
+            'product_main_category_id' => ['required', 'exists:product_main_categories,id'],
             'product_category_id' => ['nullable', 'exists:product_categories,id'],
             'title' => ['required', 'string', 'max:255'],
             'price' => ['required', 'numeric', 'min:0'],
@@ -155,8 +143,6 @@ class ProductController extends Controller
             'discounted_price' => ['nullable', 'numeric', 'min:0'],
             'stock' => ['nullable', 'integer', 'min:0'],
             'low_stock' => ['nullable', 'integer', 'min:0'],
-            'store_stocks' => ['nullable', 'array'],
-            'store_stocks.*' => ['nullable', 'integer', 'min:0'],
             'image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,gif,webp,avif', 'max:10240'],
         ]);
 
@@ -173,32 +159,31 @@ class ProductController extends Controller
         }
 
         $defaultLowStock = isset($validated['low_stock']) ? (int) $validated['low_stock'] : ($product->low_stock ?? 5);
+        $updatedStock = isset($validated['stock']) ? max(0, (int) $validated['stock']) : (int) $product->stock;
 
-        DB::transaction(function () use ($product, $validated, $price, $discount, $discountedPrice, $defaultLowStock, $imagePath) {
+        DB::transaction(function () use ($product, $validated, $price, $discount, $discountedPrice, $defaultLowStock, $updatedStock, $imagePath) {
             $product->update([
+                'product_main_category_id' => $validated['product_main_category_id'],
                 'product_category_id' => $validated['product_category_id'] ?? null,
                 'title' => $validated['title'],
                 'price' => $price,
                 'discount' => $discount,
                 'discounted_price' => $discountedPrice,
+                'stock' => $updatedStock,
                 'low_stock' => $defaultLowStock,
                 'image' => $imagePath,
             ]);
 
-            // Update multi-store stocks if provided
-            if (!empty($validated['store_stocks'])) {
-                foreach ($validated['store_stocks'] as $storeId => $qty) {
+            // Sync with default store stock for backward compatibility
+            try {
+                $defaultStore = Store::getDefaultStore();
+                if ($defaultStore) {
                     ProductStoreStock::updateOrCreate(
-                        ['product_id' => $product->id, 'store_id' => (int) $storeId],
-                        [
-                            'stock' => max(0, (int) $qty),
-                            'low_stock' => $defaultLowStock,
-                        ]
+                        ['product_id' => $product->id, 'store_id' => $defaultStore->id],
+                        ['stock' => $updatedStock, 'low_stock' => $defaultLowStock]
                     );
                 }
-            }
-
-            $product->syncTotalStock();
+            } catch (\Throwable $e) {}
         });
 
         return redirect()->route('manager.products.index')
@@ -212,7 +197,10 @@ class ProductController extends Controller
     {
         ImageUploadService::delete($product->image);
 
-        $product->storeStocks()->delete();
+        try {
+            $product->storeStocks()->delete();
+        } catch (\Throwable $e) {}
+
         $product->delete();
 
         return redirect()->route('manager.products.index')

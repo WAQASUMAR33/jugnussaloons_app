@@ -94,6 +94,9 @@
             <a href="{{ route('manager.reports.profit') }}" class="py-3 px-4 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap {{ request()->routeIs('manager.reports.profit') ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50 font-extrabold' : 'border-transparent text-slate-500 hover:text-slate-900' }}">
                 <span>💰 Profit & Loss</span>
             </a>
+            <a href="{{ route('manager.reports.aesthetic-profit') }}" class="py-3 px-4 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap {{ request()->routeIs('manager.reports.aesthetic-profit') ? 'border-rose-600 text-rose-700 bg-rose-50/50 font-extrabold' : 'border-transparent text-slate-500 hover:text-slate-900' }}">
+                <span>Aesthetic Profit</span>
+            </a>
             <a href="{{ route('manager.reports.day-closing') }}" class="py-3 px-4 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap {{ request()->routeIs('manager.reports.day-closing') ? 'border-teal-600 text-teal-700 bg-teal-50/50 font-extrabold' : 'border-transparent text-slate-500 hover:text-slate-900' }}">
                 <span>📅 Day Closing</span>
             </a>

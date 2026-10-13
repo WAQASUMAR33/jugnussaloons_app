@@ -10,6 +10,7 @@ class Product extends Model
     use HasFactory;
 
     protected $fillable = [
+        'product_main_category_id',
         'product_category_id',
         'title',
         'price',
@@ -103,6 +104,14 @@ class Product extends Model
         }
 
         return asset(ltrim($this->image, '/'));
+    }
+
+    /**
+     * Main Category relationship.
+     */
+    public function mainCategory(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(ProductMainCategory::class, 'product_main_category_id');
     }
 
     /**

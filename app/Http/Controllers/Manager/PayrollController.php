@@ -143,7 +143,7 @@ class PayrollController extends Controller
         $search = $request->input('search');
         $status = $request->input('status');
 
-        $query = Payroll::with(['employee', 'deductionItems', 'advanceItems'])->where('month_year', $monthYear);
+        $query = Payroll::with(['employee', 'deductionItems', 'advanceItems', 'generator'])->where('month_year', $monthYear);
 
         if ($search) {
             $query->whereHas('employee', function ($q) use ($search) {
@@ -554,6 +554,8 @@ class PayrollController extends Controller
                     'status' => $validated['status'],
                     'payment_date' => $validated['status'] === 'paid' ? ($validated['payment_date'] ?? date('Y-m-d')) : null,
                     'notes' => $validated['notes'] ?? null,
+                    'generated_by' => Auth::id() ?? 1,
+                    'generated_date' => now(),
                 ]
             );
 
@@ -669,6 +671,8 @@ class PayrollController extends Controller
                 'status' => $validated['status'],
                 'payment_date' => $validated['status'] === 'paid' ? ($validated['payment_date'] ?? date('Y-m-d')) : null,
                 'notes' => $validated['notes'] ?? null,
+                'generated_by' => $payroll->generated_by ?? (Auth::id() ?? 1),
+                'generated_date' => $payroll->generated_date ?? now(),
             ]);
 
             SalaryAdvance::where('account_id', $payroll->account_id)
@@ -785,6 +789,8 @@ class PayrollController extends Controller
                 'deductions' => $deductions,
                 'advance_salary' => $advanceSalary,
                 'net_salary' => $netSalary,
+                'generated_by' => Auth::id() ?? 1,
+                'generated_date' => now(),
             ]);
 
             if ($payroll->status === 'paid') {
@@ -855,6 +861,8 @@ class PayrollController extends Controller
                             'status' => $status,
                             'payment_date' => $paymentDate,
                             'notes' => $notes,
+                            'generated_by' => Auth::id() ?? 1,
+                            'generated_date' => now(),
                         ]
                     );
 
@@ -955,6 +963,8 @@ class PayrollController extends Controller
                         'net_salary' => $netSalary,
                         'status' => $existing ? $existing->status : 'draft',
                         'notes' => $existing ? $existing->notes : 'Auto-generated from database attendance, commissions and deductions.',
+                        'generated_by' => Auth::id() ?? 1,
+                        'generated_date' => now(),
                     ]
                 );
 

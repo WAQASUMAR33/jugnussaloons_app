@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ProductCategory extends Model
 {
@@ -13,6 +14,7 @@ class ProductCategory extends Model
     protected $table = 'product_categories';
 
     protected $fillable = [
+        'product_main_category_id',
         'title',
         'description',
         'image',
@@ -21,6 +23,14 @@ class ProductCategory extends Model
     protected $appends = [
         'image_url',
     ];
+
+    /**
+     * Parent main category.
+     */
+    public function mainCategory(): BelongsTo
+    {
+        return $this->belongsTo(ProductMainCategory::class, 'product_main_category_id');
+    }
 
     /**
      * Products associated with this category.

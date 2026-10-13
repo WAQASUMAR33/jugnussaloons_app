@@ -88,12 +88,9 @@
                 <td class="val font-mono">{{ $purchase->supplier->phone_no1 ?: ($purchase->supplier->phone_no2 ?: '—') }}</td>
             </tr>
             <tr>
-                <td class="label">Destination Store:</td>
+                <td class="label">Main Category:</td>
                 <td class="val font-bold text-slate-800">
-                    🏬 {{ $purchase->store ? $purchase->store->name : 'Main Store' }}
-                    @if($purchase->store && $purchase->store->code)
-                        <span class="text-[8.5pt] font-mono font-normal">({{ $purchase->store->code }})</span>
-                    @endif
+                    🏛️ {{ $purchase->mainCategory ? $purchase->mainCategory->title : 'General Category' }}
                 </td>
                 <td class="label">Payment Status:</td>
                 <td class="val">

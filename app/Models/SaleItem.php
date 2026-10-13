@@ -13,6 +13,8 @@ class SaleItem extends Model
     protected $fillable = [
         'sale_id',
         'product_id',
+        'custom_title',
+        'is_addon',
         'quantity',
         'purchase_price',
         'unit_price',
@@ -22,6 +24,7 @@ class SaleItem extends Model
     ];
 
     protected $casts = [
+        'is_addon' => 'boolean',
         'purchase_price' => 'decimal:2',
         'unit_price' => 'decimal:2',
         'discount' => 'decimal:2',
@@ -36,5 +39,13 @@ class SaleItem extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class, 'product_id');
+    }
+
+    public function getDisplayNameAttribute(): string
+    {
+        if ($this->is_addon || empty($this->product_id)) {
+            return $this->custom_title ?: 'Add-on';
+        }
+        return $this->product ? $this->product->title : ($this->custom_title ?: 'Product');
     }
 }

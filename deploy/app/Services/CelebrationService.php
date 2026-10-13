@@ -31,7 +31,7 @@ class CelebrationService
         foreach ($accounts as $account) {
             $hasBirthday = !empty($account->date_of_birth);
             $hasAnniversary = !empty($account->date_of_anniversary);
-            $cleanPhone = preg_replace('/[^0-9]/', '', $account->phone_no1 ?? '');
+            $cleanPhone = self::formatWhatsAppPhone($account->phone_no1 ?? '');
 
             if ($hasBirthday) {
                 try {
@@ -53,7 +53,7 @@ class CelebrationService
                     // Generate Birthday Wishing Message & WhatsApp URL
                     $bdayMilestone = $account->turning_age ? "Turning {$account->turning_age}" : 'Birthday';
                     $account->birthday_wishing_message = $setting->getBirthdayMessageFor($account->name, $bdayMilestone, $account->birthday_formatted);
-                    $account->birthday_whatsapp_url = $cleanPhone ? "https://wa.me/{$cleanPhone}?text=" . rawurlencode($account->birthday_wishing_message) : null;
+                    $account->birthday_whatsapp_url = self::buildWhatsAppUrl($cleanPhone, $account->birthday_wishing_message);
                 } catch (\Exception $e) {
                     $account->days_until_birthday = null;
                 }
@@ -79,7 +79,7 @@ class CelebrationService
                     // Generate Marriage Ceremony Wishing Message & WhatsApp URL
                     $annivMilestone = $account->anniversary_years ? "{$account->anniversary_years} Year Marriage Anniversary" : 'Marriage Ceremony Anniversary';
                     $account->anniversary_wishing_message = $setting->getAnniversaryMessageFor($account->name, $annivMilestone, $account->anniversary_formatted);
-                    $account->anniversary_whatsapp_url = $cleanPhone ? "https://wa.me/{$cleanPhone}?text=" . rawurlencode($account->anniversary_wishing_message) : null;
+                    $account->anniversary_whatsapp_url = self::buildWhatsAppUrl($cleanPhone, $account->anniversary_wishing_message);
                 } catch (\Exception $e) {
                     $account->days_until_anniversary = null;
                 }
@@ -123,7 +123,7 @@ class CelebrationService
         $combinedUpcoming = collect();
 
         foreach ($celebrants as $acc) {
-            $cleanPhone = preg_replace('/[^0-9]/', '', $acc->phone_no1 ?? '');
+            $cleanPhone = self::formatWhatsAppPhone($acc->phone_no1 ?? '');
 
             if (isset($acc->days_until_birthday)) {
                 $earlyBdayMsg = "Hello {$acc->name}! 🎂 Warm early birthday wishes from {$salonName}! We look forward to celebrating your birthday on {$acc->birthday_formatted}. Visit us to claim your exclusive celebration makeover & discount offer!";
@@ -135,11 +135,11 @@ class CelebrationService
                     'milestone' => $acc->turning_age ? "Turning {$acc->turning_age}" : 'Birthday',
                     'formatted_date' => $acc->birthday_formatted,
                     'wishing_message' => $acc->birthday_wishing_message,
-                    'whatsapp_url' => $cleanPhone ? "https://wa.me/{$cleanPhone}?text=" . rawurlencode($earlyBdayMsg) : null,
+                    'whatsapp_url' => self::buildWhatsAppUrl($cleanPhone, $earlyBdayMsg),
                 ]);
             }
             if (isset($acc->days_until_anniversary)) {
-                $earlyAnnivMsg = "Hello {$acc->name}! 💍 Warm advance wishes from {$salonName} for your upcoming marriage ceremony anniversary on {$acc->anniversary_formatted}! Celebrate your special milestone with our luxury couple pampering packages!";
+                $earlyAnnivMsg = "Hello {$acc->name}! 💍 Warm advance wishes from {$salonName}! We look forward to celebrating your marriage ceremony anniversary on {$acc->anniversary_formatted}! Celebrate your special milestone with our luxury couple pampering packages!";
                 $combinedUpcoming->push([
                     'type' => 'anniversary',
                     'account' => $acc,
@@ -148,7 +148,7 @@ class CelebrationService
                     'milestone' => $acc->anniversary_years ? "{$acc->anniversary_years} Year Anniversary" : 'Marriage Ceremony Anniversary',
                     'formatted_date' => $acc->anniversary_formatted,
                     'wishing_message' => $acc->anniversary_wishing_message,
-                    'whatsapp_url' => $cleanPhone ? "https://wa.me/{$cleanPhone}?text=" . rawurlencode($earlyAnnivMsg) : null,
+                    'whatsapp_url' => self::buildWhatsAppUrl($cleanPhone, $earlyAnnivMsg),
                 ]);
             }
         }
@@ -169,5 +169,63 @@ class CelebrationService
             'totalMonthCelebrations' => $thisMonthBirthdays->count() + $thisMonthAnniversaries->count(),
             'totalRegisteredCelebrants' => $celebrants->count(),
         ];
+    }
+
+    /**
+     * Normalize a phone number to international E.164 format for WhatsApp.
+     * Handles local Pakistani formats (e.g. 03001234567, 3001234567 -> 923001234567)
+     * as well as standard international numbers (+852..., 0092...).
+     *
+     * @param string|null $phone
+     * @return string|null
+     */
+    public static function formatWhatsAppPhone(?string $phone): ?string
+    {
+        if (empty($phone)) {
+            return null;
+        }
+
+        $digits = preg_replace('/[^0-9]/', '', $phone);
+        if (empty($digits)) {
+            return null;
+        }
+
+        // Handle leading double zero (e.g., 0092... or 001...)
+        if (str_starts_with($digits, '00')) {
+            $digits = substr($digits, 2);
+        }
+
+        // If starts with single 0 (Pakistani local numbers, e.g. 03001234567 -> 923001234567)
+        if (str_starts_with($digits, '0')) {
+            $digits = '92' . ltrim($digits, '0');
+        }
+        // If entered without leading 0 (e.g. 3001234567, 10 digits starting with 3)
+        elseif (strlen($digits) === 10 && str_starts_with($digits, '3')) {
+            $digits = '92' . $digits;
+        }
+
+        // Valid phone with country code must be at least 8 digits
+        if (strlen($digits) < 8) {
+            return null;
+        }
+
+        return $digits;
+    }
+
+    /**
+     * Generate a WhatsApp direct chat URL with pre-filled message text.
+     *
+     * @param string|null $phone
+     * @param string $message
+     * @return string|null
+     */
+    public static function buildWhatsAppUrl(?string $phone, string $message): ?string
+    {
+        $formatted = self::formatWhatsAppPhone($phone);
+        if (!$formatted) {
+            return null;
+        }
+
+        return "https://wa.me/{$formatted}?text=" . rawurlencode($message);
     }
 }

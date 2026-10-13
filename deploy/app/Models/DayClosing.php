@@ -36,6 +36,9 @@ class DayClosing extends Model
         'closed_by',
         'closed_at',
         'notes',
+        'next_day_opening_cash',
+        'next_day_opening_bank',
+        'next_day_opening_total',
     ];
 
     protected $casts = [
@@ -59,6 +62,9 @@ class DayClosing extends Model
         'cash_difference' => 'decimal:2',
         'denominations' => 'array',
         'closed_at' => 'datetime',
+        'next_day_opening_cash' => 'decimal:2',
+        'next_day_opening_bank' => 'decimal:2',
+        'next_day_opening_total' => 'decimal:2',
     ];
 
     /**

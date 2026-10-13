@@ -133,12 +133,24 @@
             </div>
         </div>
 
-        <!-- Metric 2: This Month Total -->
+        <!-- Metric 2: This Month Total / Selected Dates Total -->
         <div class="bg-white p-5 border border-slate-200 shadow-sm flex items-center justify-between">
             <div>
-                <p class="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider">This Month's Total</p>
-                <h3 class="text-2xl font-black text-slate-900 mt-1">{{ number_format($thisMonthTotal, 2) }}</h3>
-                <p class="text-[11px] font-semibold text-emerald-600 mt-1">{{ date('F Y') }}</p>
+                <p class="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider">
+                    {{ ($dateFrom || $dateTo) ? 'Selected Dates Total' : "This Month's Total" }}
+                </p>
+                <h3 class="text-2xl font-black text-slate-900 mt-1">{{ number_format($monthOrPeriodTotal ?? $thisMonthTotal, 2) }}</h3>
+                <p class="text-[11px] font-semibold text-emerald-600 mt-1">
+                    @if($dateFrom && $dateTo)
+                        {{ \Carbon\Carbon::parse($dateFrom)->format('d M') }} — {{ \Carbon\Carbon::parse($dateTo)->format('d M, Y') }}
+                    @elseif($dateFrom)
+                        From {{ \Carbon\Carbon::parse($dateFrom)->format('d M, Y') }}
+                    @elseif($dateTo)
+                        Until {{ \Carbon\Carbon::parse($dateTo)->format('d M, Y') }}
+                    @else
+                        {{ date('F Y') }}
+                    @endif
+                </p>
             </div>
             <div class="p-3 bg-indigo-50 text-indigo-600 rounded-lg">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
@@ -161,15 +173,22 @@
             </div>
         </div>
 
-        <!-- Metric 4: Total Categories Count -->
+        <!-- Metric 4: Aesthetic Expense -->
         <div class="bg-white p-5 border border-slate-200 shadow-sm flex items-center justify-between">
             <div>
-                <p class="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider">Active Categories</p>
-                <h3 class="text-2xl font-black text-slate-900 mt-1">{{ count($categories) }}</h3>
-                <p class="text-[11px] font-semibold text-slate-500 mt-1">Configured Types</p>
+                <p class="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider">Aesthetic Expense</p>
+                <h3 class="text-2xl font-black text-slate-900 mt-1">{{ number_format($aestheticTotal, 2) }}</h3>
+                <p class="text-[11px] font-semibold text-slate-500 mt-1">
+                    {{ $aestheticCount }} {{ Str::plural('record', $aestheticCount) }}
+                    @if($totalExpensesAmount > 0)
+                        <span class="text-purple-600 font-bold ml-1">({{ round(($aestheticTotal / $totalExpensesAmount) * 100, 1) }}%)</span>
+                    @endif
+                </p>
             </div>
             <div class="p-3 bg-purple-50 text-purple-600 rounded-lg">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
+                </svg>
             </div>
         </div>
     </div>
@@ -181,7 +200,7 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
             @foreach($categoryBreakdown as $catItem)
                 @php
-                    $percentage = $totalExpensesAmount > 0 ? round(($catItem->total_amount / $totalExpensesAmount) * 100, 1) : 0;
+                    $percentage = $totalExpensesAmount > 0 ? min(100, round(($catItem->total_amount / $totalExpensesAmount) * 100, 1)) : 0;
                 @endphp
                 <div class="p-3 bg-slate-50 border border-slate-200/80 rounded space-y-1">
                     <div class="flex items-center justify-between text-xs">

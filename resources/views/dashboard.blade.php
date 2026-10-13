@@ -105,11 +105,6 @@
                             {{ $isFallbackSchedule ? 'Showing latest recorded bookings from database' : 'Real-time schedule for today\'s active salon services' }}
                         </p>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <a href="{{ route('manager.appointments.index') }}" class="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors shadow-xs">
-                            View Calendar &rarr;
-                        </a>
-                    </div>
                 </div>
 
                 <div class="overflow-x-auto">

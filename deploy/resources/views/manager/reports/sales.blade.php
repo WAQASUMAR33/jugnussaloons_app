@@ -94,6 +94,9 @@
             <a href="{{ route('manager.reports.profit') }}" class="py-3 px-4 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap {{ request()->routeIs('manager.reports.profit') ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50 font-extrabold' : 'border-transparent text-slate-500 hover:text-slate-900' }}">
                 <span>💰 Profit & Loss</span>
             </a>
+            <a href="{{ route('manager.reports.aesthetic-profit') }}" class="py-3 px-4 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap {{ request()->routeIs('manager.reports.aesthetic-profit') ? 'border-rose-600 text-rose-700 bg-rose-50/50 font-extrabold' : 'border-transparent text-slate-500 hover:text-slate-900' }}">
+                <span>Aesthetic Profit</span>
+            </a>
             <a href="{{ route('manager.reports.day-closing') }}" class="py-3 px-4 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap {{ request()->routeIs('manager.reports.day-closing') ? 'border-teal-600 text-teal-700 bg-teal-50/50 font-extrabold' : 'border-transparent text-slate-500 hover:text-slate-900' }}">
                 <span>📅 Day Closing</span>
             </a>
@@ -322,6 +325,7 @@
                             <th class="py-2.5 px-3">Date</th>
                             <th class="py-2.5 px-4">Customer Account</th>
                             <th class="py-2.5 px-3">Category</th>
+                            <th class="py-2.5 px-3">Mode</th>
                             <th class="py-2.5 px-3 text-right">Gross</th>
                             <th class="py-2.5 px-3 text-right">Discount</th>
                             <th class="py-2.5 px-3 text-right">Net</th>
@@ -343,6 +347,15 @@
                                     {{ $sale->customer->category->title ?? 'General' }}
                                 </span>
                             </td>
+                            <td class="py-2 px-3">
+                                @if(strtolower($sale->payment_mode ?? '') === 'bank' && $sale->bankAccount)
+                                    <span class="font-bold text-indigo-700 text-[10px]" title="{{ $sale->bankAccount->account_no }}">{{ $sale->bankAccount->bank_name }}</span>
+                                @elseif(strtolower($sale->payment_mode ?? '') === 'split')
+                                    <span class="font-black text-indigo-800 text-[9px] bg-indigo-50 px-1 py-0.5 border border-indigo-200 uppercase">Split</span>
+                                @else
+                                    <span class="text-slate-600 text-[10px]">{{ $sale->payment_mode ?? 'Cash' }}</span>
+                                @endif
+                            </td>
                             <td class="py-2 px-3 text-right font-bold text-slate-700">{{ number_format($sale->total_amount, 2) }}</td>
                             <td class="py-2 px-3 text-right font-bold text-amber-700">{{ number_format($sale->discount, 2) }}</td>
                             <td class="py-2 px-3 text-right font-black text-slate-900">{{ number_format($sale->total_amount - $sale->discount, 2) }}</td>
@@ -353,7 +366,7 @@
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="10" class="py-12 text-center text-slate-400 font-semibold">
+                            <td colspan="11" class="py-12 text-center text-slate-400 font-semibold">
                                 No sales record found for the selected date range and filter criteria.
                             </td>
                         </tr>
@@ -361,7 +374,7 @@
                     </tbody>
                     <tfoot>
                         <tr class="font-black">
-                            <td colspan="5" class="py-2 px-3 text-right uppercase">Summary Grand Total:</td>
+                            <td colspan="6" class="py-2 px-3 text-right uppercase">Summary Grand Total:</td>
                             <td class="py-2 px-3 text-right">{{ number_format($totalGrossAmount, 2) }}</td>
                             <td class="py-2 px-3 text-right">{{ number_format($totalDiscount, 2) }}</td>
                             <td class="py-2 px-3 text-right">{{ number_format($totalNetAmount, 2) }}</td>

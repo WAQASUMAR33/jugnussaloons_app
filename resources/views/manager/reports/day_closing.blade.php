@@ -19,6 +19,8 @@
     manualCount: {{ $dayClosing && $dayClosing->cash_actual_counted !== null ? (float)$dayClosing->cash_actual_counted : 0 }},
     useDenom: true,
     expectedCash: {{ (float)$closingCashExpected }},
+    nextDayOpeningCash: {{ $dayClosing && $dayClosing->next_day_opening_cash !== null ? (float)$dayClosing->next_day_opening_cash : (float)$closingCashExpected }},
+    nextDayOpeningBank: {{ $dayClosing && $dayClosing->next_day_opening_bank !== null ? (float)$dayClosing->next_day_opening_bank : (float)$closingBankExpected }},
     get calculatedCash() {
         if (!this.useDenom) return parseFloat(this.manualCount) || 0;
         return (this.denom.n5000 * 5000) +
@@ -50,6 +52,9 @@
     matchExpected() {
         this.useDenom = false;
         this.manualCount = this.expectedCash;
+    },
+    setNextDayCash(amt) {
+        this.nextDayOpeningCash = Math.max(0, parseFloat(amt) || 0);
     }
 }">
 
@@ -180,6 +185,9 @@
             </a>
             <a href="{{ route('manager.reports.profit') }}" class="py-3 px-4 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap {{ request()->routeIs('manager.reports.profit') ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50 font-extrabold' : 'border-transparent text-slate-500 hover:text-slate-900' }}">
                 <span>💰 Profit & Loss</span>
+            </a>
+            <a href="{{ route('manager.reports.aesthetic-profit') }}" class="py-3 px-4 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap {{ request()->routeIs('manager.reports.aesthetic-profit') ? 'border-rose-600 text-rose-700 bg-rose-50/50 font-extrabold' : 'border-transparent text-slate-500 hover:text-slate-900' }}">
+                <span>Aesthetic Profit</span>
             </a>
             <a href="{{ route('manager.reports.sales') }}" class="py-3 px-4 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap {{ request()->routeIs('manager.reports.sales') ? 'border-indigo-600 text-indigo-600 bg-indigo-50/40' : 'border-transparent text-slate-500 hover:text-slate-900' }}">
                 <span>📊 Sales Report</span>
@@ -452,6 +460,20 @@
                         "{{ $dayClosing->notes }}"
                     </p>
                 @endif
+                @if($dayClosing && ($dayClosing->next_day_opening_cash !== null || $dayClosing->next_day_opening_bank !== null))
+                    <div class="mt-2.5 pt-2 border-t border-emerald-200/80 flex flex-wrap items-center gap-2 text-xs font-bold text-emerald-950">
+                        <span class="text-[10px] uppercase tracking-wider text-emerald-800 font-black">Next Day Opening Set:</span>
+                        <span class="bg-white/90 px-2.5 py-0.5 rounded-lg border border-emerald-200 shadow-2xs">
+                            💵 Cash Float: <strong>Rs. {{ number_format($dayClosing->next_day_opening_cash ?? 0, 2) }}</strong>
+                        </span>
+                        <span class="bg-white/90 px-2.5 py-0.5 rounded-lg border border-emerald-200 shadow-2xs">
+                            🏦 Bank: <strong>Rs. {{ number_format($dayClosing->next_day_opening_bank ?? 0, 2) }}</strong>
+                        </span>
+                        <span class="bg-emerald-600 text-white px-2.5 py-0.5 rounded-lg shadow-2xs">
+                            Total: <strong>Rs. {{ number_format(($dayClosing->next_day_opening_cash ?? 0) + ($dayClosing->next_day_opening_bank ?? 0), 2) }}</strong>
+                        </span>
+                    </div>
+                @endif
             </div>
         </div>
         <div class="flex items-center gap-2">
@@ -522,7 +544,7 @@
                         <span class="w-7 h-7 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xs font-black shadow-xs">1</span>
                         <div>
                             <h3 class="text-xs font-black uppercase tracking-wider text-indigo-950">Starting Float / Opening Balances</h3>
-                            <p class="text-[11px] text-slate-500 font-medium">Daily opening float position (Fixed to 0.00)</p>
+                            <p class="text-[11px] text-slate-500 font-medium">Daily starting register and vault float position</p>
                         </div>
                     </div>
                     <div class="text-right">
@@ -1008,6 +1030,80 @@
                                 </div>
                             </div>
 
+                            <!-- NEXT DAY OPENING BALANCE SECTION -->
+                            <div class="p-4 rounded-2xl bg-teal-50/70 border-2 border-teal-200/90 space-y-3">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-6 h-6 rounded-lg bg-teal-600 text-white flex items-center justify-center text-xs font-black shadow-xs">🌅</span>
+                                        <div>
+                                            <span class="text-xs font-black uppercase tracking-wider text-teal-950">Next Day Opening Float</span>
+                                            <p class="text-[10px] text-teal-700 font-semibold">{{ \Carbon\Carbon::parse($date)->addDay()->format('l, d M Y') }}</p>
+                                        </div>
+                                    </div>
+                                    <span class="px-2 py-0.5 rounded text-[10px] font-black bg-teal-200/80 text-teal-900 border border-teal-300">
+                                        For Tomorrow
+                                    </span>
+                                </div>
+
+                                <!-- Opening Cash Float for Next Day -->
+                                <div class="space-y-1.5">
+                                    <div class="flex items-center justify-between text-xs">
+                                        <label class="font-black text-slate-800">Tomorrow Opening Cash (Drawer Float):</label>
+                                        <span class="font-extrabold text-teal-800" x-text="'Rs. ' + (parseFloat(nextDayOpeningCash) || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+                                    </div>
+                                    <div class="relative">
+                                        <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 font-bold text-xs">PKR</span>
+                                        <input type="number" step="0.01" min="0" x-model.number="nextDayOpeningCash" name="next_day_opening_cash"
+                                               class="w-full pl-12 pr-4 py-2.5 bg-white border border-teal-300 rounded-xl font-black text-base text-slate-900 focus:ring-2 focus:ring-teal-500"
+                                               placeholder="0.00">
+                                    </div>
+                                    
+                                    <!-- Quick Preset Buttons -->
+                                    <div class="flex flex-wrap items-center gap-1.5 pt-1">
+                                        <button type="button" @click="setNextDayCash(calculatedCash)"
+                                                class="px-2.5 py-1 rounded-lg bg-white hover:bg-teal-100 text-teal-900 text-[10.5px] font-bold border border-teal-200 shadow-2xs transition-colors flex items-center gap-1 cursor-pointer">
+                                            <span>💵</span> Match Counted Cash
+                                        </button>
+                                        <button type="button" @click="setNextDayCash(5000)"
+                                                class="px-2 py-1 rounded-lg bg-white hover:bg-teal-100 text-teal-800 text-[10.5px] font-bold border border-teal-200 shadow-2xs transition-colors cursor-pointer">
+                                            Rs. 5,000 Float
+                                        </button>
+                                        <button type="button" @click="setNextDayCash(10000)"
+                                                class="px-2 py-1 rounded-lg bg-white hover:bg-teal-100 text-teal-800 text-[10.5px] font-bold border border-teal-200 shadow-2xs transition-colors cursor-pointer">
+                                            Rs. 10,000 Float
+                                        </button>
+                                        <button type="button" @click="setNextDayCash(0)"
+                                                class="px-2 py-1 rounded-lg bg-white hover:bg-rose-50 text-rose-700 text-[10.5px] font-bold border border-rose-200 shadow-2xs transition-colors cursor-pointer">
+                                            Rs. 0 (Deposit All)
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Opening Bank for Next Day (Carried Forward) -->
+                                <div class="space-y-1.5 pt-1 border-t border-teal-200/60">
+                                    <div class="flex items-center justify-between text-xs">
+                                        <label class="font-black text-slate-800">Tomorrow Opening Bank / Vault:</label>
+                                        <span class="font-extrabold text-indigo-800" x-text="'Rs. ' + (parseFloat(nextDayOpeningBank) || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+                                    </div>
+                                    <div class="relative">
+                                        <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 font-bold text-xs">PKR</span>
+                                        <input type="number" step="0.01" min="0" x-model.number="nextDayOpeningBank" name="next_day_opening_bank"
+                                               class="w-full pl-12 pr-4 py-2 bg-white border border-teal-300 rounded-xl font-bold text-sm text-slate-900 focus:ring-2 focus:ring-teal-500"
+                                               placeholder="{{ number_format($closingBankExpected, 2) }}">
+                                    </div>
+                                    <div class="flex items-center justify-between text-[10px] text-teal-800 font-medium">
+                                        <span>Carried forward digital balance</span>
+                                        <button type="button" @click="nextDayOpeningBank = {{ (float)$closingBankExpected }}" class="font-bold underline hover:text-teal-950 cursor-pointer">
+                                            Reset to Today's Closing Bank (Rs. {{ number_format($closingBankExpected, 2) }})
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <p class="text-[10px] text-teal-800/90 font-medium leading-relaxed bg-white/60 p-2 rounded-lg border border-teal-200/60">
+                                    💡 This amount will automatically become the <strong>Starting Opening Float</strong> when opening the register on <strong>{{ \Carbon\Carbon::parse($date)->addDay()->format('d M Y') }}</strong>.
+                                </p>
+                            </div>
+
                             <!-- Closing Notes -->
                             <div class="space-y-1.5 pt-1">
                                 <label class="block text-xs font-black text-slate-700">Closing Handover Notes:</label>
@@ -1324,8 +1420,10 @@
                         <div class="p-2.5 rounded-xl bg-emerald-50/60 border border-emerald-100/80">
                             <span class="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block">Money In (Received)</span>
                             <span class="text-sm font-black text-emerald-700">Rs. {{ number_format($bInfo['total_received'], 2) }}</span>
-                            @if($bInfo['appointments_count'] > 0)
-                                <span class="text-[9.5px] text-emerald-600 font-medium block mt-0.5">{{ $bInfo['appointments_count'] }} bookings</span>
+                            @if(($bInfo['appointments_count'] ?? 0) > 0 || ($bInfo['sales_count'] ?? 0) > 0)
+                                <span class="text-[9.5px] text-emerald-600 font-medium block mt-0.5">
+                                    {{ $bInfo['appointments_count'] ?? 0 }} bookings{{ ($bInfo['sales_count'] ?? 0) > 0 ? ' • ' . $bInfo['sales_count'] . ' sales' : '' }}
+                                </span>
                             @endif
                         </div>
                         <div class="p-2.5 rounded-xl bg-rose-50/60 border border-rose-100/80">
@@ -1556,6 +1654,13 @@
                 <strong>Closing Notes:</strong> {{ $dayClosing->notes }}
             </div>
             @endif
+
+            <div class="border border-black p-2 mt-2 text-xs bg-slate-50">
+                <span class="font-bold">Next Day Opening Float (Carried Forward):</span>
+                <span>Cash: <strong>Rs. {{ number_format($dayClosing->next_day_opening_cash ?? $closingCashExpected, 2) }}</strong></span> &bull; 
+                <span>Bank: <strong>Rs. {{ number_format($dayClosing->next_day_opening_bank ?? $closingBankExpected, 2) }}</strong></span> &bull; 
+                <span>Total: <strong>Rs. {{ number_format(($dayClosing->next_day_opening_cash ?? $closingCashExpected) + ($dayClosing->next_day_opening_bank ?? $closingBankExpected), 2) }}</strong></span>
+            </div>
         </div>
 
         <!-- Signature Authorization Block -->

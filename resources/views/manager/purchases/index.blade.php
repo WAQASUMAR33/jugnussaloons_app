@@ -10,8 +10,8 @@
     selectedPurchase: null,
     suppliersList: {{ json_encode($suppliers) }},
     productsList: {{ json_encode($products) }},
-    storesList: {{ json_encode($stores) }},
-    selectedStoreId: '{{ $defaultStore->id ?? ($stores->first()->id ?? '') }}',
+    mainCategoriesList: {{ json_encode($mainCategories) }},
+    selectedMainCategoryId: '{{ $mainCategories->first()->id ?? '' }}',
     selectedSupplierId: '',
     supplierSearchTerm: '',
     supplierDropdownOpen: false,
@@ -33,12 +33,8 @@
         });
     },
 
-    getProductStoreStock(prod, storeId) {
+    getProductStock(prod) {
         if (!prod) return 0;
-        if (prod.store_stocks && Array.isArray(prod.store_stocks)) {
-            const found = prod.store_stocks.find(s => s.store_id == (storeId || this.selectedStoreId));
-            if (found) return parseInt(found.stock) || 0;
-        }
         return parseInt(prod.stock) || 0;
     },
     
@@ -122,13 +118,13 @@
                        class="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-amber-600 focus:bg-white transition-all">
             </div>
 
-            <!-- Store Filter -->
+            <!-- Main Category Filter -->
             <div class="w-full sm:w-64">
-                <select name="store_id" class="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 text-xs font-bold focus:ring-2 focus:ring-amber-600 focus:bg-white transition-all">
-                    <option value="">All Stores (Global)</option>
-                    @foreach($stores as $s)
-                        <option value="{{ $s->id }}" {{ (string)request('store_id') === (string)$s->id ? 'selected' : '' }}>
-                            🏬 {{ $s->name }} {{ $s->is_default ? '(Default)' : '' }}
+                <select name="main_category_id" class="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 text-xs font-bold focus:ring-2 focus:ring-amber-600 focus:bg-white transition-all">
+                    <option value="">All Main Categories</option>
+                    @foreach($mainCategories as $mc)
+                        <option value="{{ $mc->id }}" {{ (string)request('main_category_id') === (string)$mc->id ? 'selected' : '' }}>
+                            🏛️ {{ $mc->title }}
                         </option>
                     @endforeach
                 </select>
@@ -137,7 +133,7 @@
             <button type="submit" class="px-5 py-2.5 bg-slate-900 text-white font-bold text-xs hover:bg-slate-800 transition-colors">
                 Search Purchases
             </button>
-            @if($search || request('store_id'))
+            @if($search || request('main_category_id'))
                 <a href="{{ route('manager.purchases.index') }}" class="px-4 py-2.5 bg-slate-100 text-slate-600 font-bold text-xs hover:bg-slate-200 flex items-center justify-center">
                     Reset
                 </a>
@@ -152,7 +148,7 @@
                 <thead>
                     <tr class="bg-slate-50 border-b border-slate-200 text-slate-500 text-[11px] font-extrabold uppercase tracking-wider">
                         <th class="py-4 px-6">Invoice #</th>
-                        <th class="py-4 px-6">Destination Store</th>
+                        <th class="py-4 px-6">Main Category</th>
                         <th class="py-4 px-6">Supplier Account</th>
                         <th class="py-4 px-6">Purchase Date</th>
                         <th class="py-4 px-6">Total Amount</th>
@@ -168,9 +164,9 @@
                             {{ $purchase->invoice_no }}
                         </td>
                         <td class="py-4 px-6">
-                            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 text-slate-800 text-xs font-bold border border-slate-200">
-                                <span>🏬</span>
-                                <span>{{ $purchase->store ? $purchase->store->name : ($defaultStore->name ?? 'Main Store') }}</span>
+                            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-indigo-50 text-indigo-700 text-xs font-bold border border-indigo-200">
+                                <span>🏛️</span>
+                                <span>{{ $purchase->mainCategory ? $purchase->mainCategory->title : 'General Category' }}</span>
                             </span>
                         </td>
                         <td class="py-4 px-6">
@@ -286,20 +282,18 @@
                         </div>
                     </div>
 
-                    <!-- Destination Store / Branch Selector -->
+                    <!-- Purchasing For Main Category Selector -->
                     <div>
                         <label class="block text-xs font-bold text-slate-700 uppercase mb-1">
-                            Destination Store <span class="text-rose-600">*</span>
+                            Purchasing For Main Category <span class="text-rose-600">*</span>
                         </label>
-                        <select name="store_id" x-model="selectedStoreId" required 
+                        <select name="product_main_category_id" x-model="selectedMainCategoryId" required 
                                 class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 text-xs font-bold focus:ring-2 focus:ring-amber-600">
-                            @foreach($stores as $s)
-                                <option value="{{ $s->id }}" {{ $s->is_default ? 'selected' : '' }}>
-                                    🏬 {{ $s->name }} ({{ $s->code }}) {{ $s->is_default ? '— Default' : '' }}
-                                </option>
-                            @endforeach
+                            <template x-for="mc in mainCategoriesList" :key="mc.id">
+                                <option :value="mc.id" x-text="'🏛️ ' + mc.title"></option>
+                            </template>
                         </select>
-                        <span class="text-[10px] text-slate-400 font-medium">Stock will be received at this branch</span>
+                        <span class="text-[10px] text-slate-400 font-medium">Product inventory will be categorized under this main category</span>
                     </div>
 
                     <!-- Purchase Date -->
@@ -465,8 +459,8 @@
                         <p class="text-sm font-extrabold text-slate-900" x-text="selectedPurchase.supplier ? selectedPurchase.supplier.name : 'Unknown'"></p>
                     </div>
                     <div>
-                        <p class="text-[10px] font-bold text-slate-500 uppercase">Destination Store</p>
-                        <p class="text-sm font-extrabold text-amber-700" x-text="selectedPurchase.store ? selectedPurchase.store.name : 'Main Store'"></p>
+                        <p class="text-[10px] font-bold text-slate-500 uppercase">Main Category</p>
+                        <p class="text-sm font-extrabold text-indigo-700" x-text="selectedPurchase.main_category ? selectedPurchase.main_category.title : 'General Category'"></p>
                     </div>
                 </div>
 
@@ -568,12 +562,9 @@
                         <td class="val font-mono" x-text="printablePurchase.supplier ? (printablePurchase.supplier.phone_no1 || printablePurchase.supplier.phone_no2 || '—') : '—'"></td>
                     </tr>
                     <tr>
-                        <td class="label">Destination Store:</td>
+                        <td class="label">Main Category:</td>
                         <td class="val font-bold text-slate-800">
-                            🏬 <span x-text="printablePurchase.store ? printablePurchase.store.name : 'Main Store'"></span>
-                            <template x-if="printablePurchase.store && printablePurchase.store.code">
-                                <span class="text-[8.5pt] font-mono font-normal" x-text="'(' + printablePurchase.store.code + ')'"></span>
-                            </template>
+                            🏛️ <span x-text="printablePurchase.main_category ? printablePurchase.main_category.title : 'General Category'"></span>
                         </td>
                         <td class="label">Payment Status:</td>
                         <td class="val">

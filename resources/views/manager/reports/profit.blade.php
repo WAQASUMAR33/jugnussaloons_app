@@ -85,6 +85,9 @@
             <a href="{{ route('manager.reports.profit') }}" class="py-3 px-4 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap {{ request()->routeIs('manager.reports.profit') ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50 font-extrabold' : 'border-transparent text-slate-500 hover:text-slate-900' }}">
                 <span>💰 Profit & Loss Report</span>
             </a>
+            <a href="{{ route('manager.reports.aesthetic-profit') }}" class="py-3 px-4 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap {{ request()->routeIs('manager.reports.aesthetic-profit') ? 'border-rose-600 text-rose-700 bg-rose-50/50 font-extrabold' : 'border-transparent text-slate-500 hover:text-slate-900' }}">
+                <span>Aesthetic Profit Report</span>
+            </a>
             <a href="{{ route('manager.reports.day-closing') }}" class="py-3 px-4 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap {{ request()->routeIs('manager.reports.day-closing') ? 'border-teal-600 text-teal-700 bg-teal-50/50 font-extrabold' : 'border-transparent text-slate-500 hover:text-slate-900' }}">
                 <span>📅 Day Closing & Cash</span>
             </a>
@@ -108,7 +111,9 @@
 
     <!-- Date Range & Preset Filter Bar (WEB ONLY) -->
     <div class="bg-white p-4 sm:p-5 border border-slate-200 shadow-xs print:hidden space-y-4" x-data="{
+        activePreset: '{{ $preset ?? "this_month" }}',
         setPreset(preset) {
+            this.activePreset = preset;
             const today = new Date();
             let start = new Date();
             let end = new Date();
@@ -137,6 +142,8 @@
                 return `${year}-${month}-${day}`;
             };
 
+            const presetInput = document.getElementById('profit_preset');
+            if (presetInput) presetInput.value = preset;
             document.getElementById('profit_start_date').value = formatDate(start);
             document.getElementById('profit_end_date').value = formatDate(end);
             document.getElementById('profitFilterForm').submit();
@@ -146,12 +153,39 @@
             <div class="flex flex-wrap items-center gap-2">
                 <span class="text-xs font-black uppercase text-slate-500 tracking-wider">Quick Presets:</span>
                 <div class="flex flex-wrap gap-1.5">
-                    <button type="button" @click="setPreset('today')" class="px-2.5 py-1 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors">Today</button>
-                    <button type="button" @click="setPreset('yesterday')" class="px-2.5 py-1 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors">Yesterday</button>
-                    <button type="button" @click="setPreset('this_week')" class="px-2.5 py-1 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors">This Week</button>
-                    <button type="button" @click="setPreset('this_month')" class="px-2.5 py-1 text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-colors">This Month</button>
-                    <button type="button" @click="setPreset('last_month')" class="px-2.5 py-1 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors">Last Month</button>
-                    <button type="button" @click="setPreset('this_year')" class="px-2.5 py-1 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors">This Year</button>
+                    @php
+                        $currentPreset = $preset ?? '';
+                    @endphp
+                    <button type="button" @click="setPreset('today')" 
+                            :class="activePreset === 'today' ? 'bg-indigo-600 text-white font-black shadow-xs ring-2 ring-indigo-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold'"
+                            class="px-2.5 py-1 text-[11px] transition-all cursor-pointer {{ $currentPreset === 'today' ? 'bg-indigo-600 text-white font-black shadow-xs ring-2 ring-indigo-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold' }}">
+                        Today
+                    </button>
+                    <button type="button" @click="setPreset('yesterday')" 
+                            :class="activePreset === 'yesterday' ? 'bg-indigo-600 text-white font-black shadow-xs ring-2 ring-indigo-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold'"
+                            class="px-2.5 py-1 text-[11px] transition-all cursor-pointer {{ $currentPreset === 'yesterday' ? 'bg-indigo-600 text-white font-black shadow-xs ring-2 ring-indigo-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold' }}">
+                        Yesterday
+                    </button>
+                    <button type="button" @click="setPreset('this_week')" 
+                            :class="activePreset === 'this_week' ? 'bg-indigo-600 text-white font-black shadow-xs ring-2 ring-indigo-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold'"
+                            class="px-2.5 py-1 text-[11px] transition-all cursor-pointer {{ $currentPreset === 'this_week' ? 'bg-indigo-600 text-white font-black shadow-xs ring-2 ring-indigo-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold' }}">
+                        This Week
+                    </button>
+                    <button type="button" @click="setPreset('this_month')" 
+                            :class="activePreset === 'this_month' ? 'bg-indigo-600 text-white font-black shadow-xs ring-2 ring-indigo-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold'"
+                            class="px-2.5 py-1 text-[11px] transition-all cursor-pointer {{ $currentPreset === 'this_month' ? 'bg-indigo-600 text-white font-black shadow-xs ring-2 ring-indigo-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold' }}">
+                        This Month
+                    </button>
+                    <button type="button" @click="setPreset('last_month')" 
+                            :class="activePreset === 'last_month' ? 'bg-indigo-600 text-white font-black shadow-xs ring-2 ring-indigo-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold'"
+                            class="px-2.5 py-1 text-[11px] transition-all cursor-pointer {{ $currentPreset === 'last_month' ? 'bg-indigo-600 text-white font-black shadow-xs ring-2 ring-indigo-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold' }}">
+                        Last Month
+                    </button>
+                    <button type="button" @click="setPreset('this_year')" 
+                            :class="activePreset === 'this_year' ? 'bg-indigo-600 text-white font-black shadow-xs ring-2 ring-indigo-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold'"
+                            class="px-2.5 py-1 text-[11px] transition-all cursor-pointer {{ $currentPreset === 'this_year' ? 'bg-indigo-600 text-white font-black shadow-xs ring-2 ring-indigo-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold' }}">
+                        This Year
+                    </button>
                 </div>
             </div>
             <span class="text-xs font-semibold text-slate-400">
@@ -160,15 +194,18 @@
         </div>
 
         <form id="profitFilterForm" method="GET" action="{{ route('manager.reports.profit') }}" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 items-end">
+            <input type="hidden" id="profit_preset" name="preset" value="{{ $preset ?? '' }}">
             <div>
                 <label class="block text-xs font-bold text-slate-700 mb-1">From Date (Start)</label>
                 <input type="date" id="profit_start_date" name="start_date" value="{{ $startDate }}" 
+                       @change="activePreset = ''; document.getElementById('profit_preset').value = ''"
                        class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500">
             </div>
 
             <div>
                 <label class="block text-xs font-bold text-slate-700 mb-1">To Date (End)</label>
                 <input type="date" id="profit_end_date" name="end_date" value="{{ $endDate }}" 
+                       @change="activePreset = ''; document.getElementById('profit_preset').value = ''"
                        class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 text-xs font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500">
             </div>
 
@@ -444,6 +481,60 @@
                 @else
                     <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
                 @endif
+            </div>
+        </div>
+    </div>
+
+    <!-- AESTHETIC SECTION PROFIT & LOSS CARD -->
+    <div class="bg-white border border-slate-200 shadow-xs p-5 sm:p-6 space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-3">
+            <div class="flex items-center gap-3">
+                <div class="p-2 bg-rose-50 text-rose-600">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h2 class="text-sm font-black uppercase tracking-wider text-slate-900">Aesthetic Section Profit & Loss</h2>
+                    <p class="text-xs text-slate-500">Formula: (Aesthetic Services + Aesthetic Products) &minus; Aesthetic Category Expenses</p>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="px-2.5 py-1 text-xs font-black {{ $aestheticNetProfit >= 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200' }}">
+                    {{ $aestheticNetProfit >= 0 ? 'Profitable' : 'Net Loss' }}: PKR {{ number_format($aestheticNetProfit, 2) }}
+                </span>
+                <a href="{{ route('manager.reports.aesthetic-profit', ['start_date' => $startDate, 'end_date' => $endDate, 'preset' => $preset]) }}" 
+                   class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors">
+                    <span>View Aesthetic Report</span>
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                </a>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div class="p-3.5 bg-slate-50 border border-slate-200">
+                <span class="text-[10px] uppercase font-bold text-slate-400 block">Total Aesthetic Sales</span>
+                <strong class="text-base font-black text-slate-900 block mt-1 font-mono">PKR {{ number_format($aestheticTotalSales, 2) }}</strong>
+                <span class="text-[10px] text-slate-500 mt-0.5 block">Services: PKR {{ number_format($aestheticServiceSalesTotal, 0) }} | Products: PKR {{ number_format($aestheticProdSalesTotal, 0) }}</span>
+            </div>
+
+            <div class="p-3.5 bg-slate-50 border border-slate-200">
+                <span class="text-[10px] uppercase font-bold text-slate-400 block">Aesthetic Expenses</span>
+                <strong class="text-base font-black text-rose-600 block mt-1 font-mono">PKR {{ number_format($aestheticExpensesTotal, 2) }}</strong>
+                <span class="text-[10px] text-slate-500 mt-0.5 block">{{ $aestheticExpensesCount }} expense entries booked</span>
+            </div>
+
+            <div class="p-3.5 bg-slate-50 border border-slate-200">
+                <span class="text-[10px] uppercase font-bold text-slate-400 block">Aesthetic Net Profit</span>
+                <strong class="text-base font-black {{ $aestheticNetProfit >= 0 ? 'text-emerald-700' : 'text-rose-600' }} block mt-1 font-mono">PKR {{ number_format($aestheticNetProfit, 2) }}</strong>
+                <span class="text-[10px] text-slate-500 mt-0.5 block">Revenue &minus; Expenses</span>
+            </div>
+
+            <div class="p-3.5 bg-slate-50 border border-slate-200">
+                <span class="text-[10px] uppercase font-bold text-slate-400 block">Aesthetic Profit Margin</span>
+                <strong class="text-base font-black text-slate-900 block mt-1 font-mono">{{ $aestheticProfitMargin }}%</strong>
+                <span class="text-[10px] text-slate-500 mt-0.5 block">Net Profit / Total Sales</span>
             </div>
         </div>
     </div>

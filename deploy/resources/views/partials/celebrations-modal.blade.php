@@ -4,11 +4,46 @@
 
 @if($totalCelebrations > 0)
 <div x-data="{ 
+    storageKey: 'celebrations_popup_dismissed_{{ now()->format('Y-m-d') }}_{{ auth()->id() ?? 'guest' }}',
+    isDismissed: true,
     openCelebrationModal: false, 
-    activeCelebrationTab: 'all'
-}" x-cloak class="relative z-50">
+    activeCelebrationTab: 'all',
+    init() {
+        try {
+            const dismissed = localStorage.getItem(this.storageKey);
+            if (dismissed === 'true') {
+                this.isDismissed = true;
+                this.openCelebrationModal = false;
+            } else {
+                this.isDismissed = false;
+                this.openCelebrationModal = true;
+            }
 
-    <!-- Clean Top Trigger Bar (Click to Show Popup) -->
+            // Clean up old celebration dismissal keys from previous days
+            for (let i = localStorage.length - 1; i >= 0; i--) {
+                const k = localStorage.key(i);
+                if (k && k.startsWith('celebrations_popup_dismissed_') && !k.includes('{{ now()->format('Y-m-d') }}')) {
+                    localStorage.removeItem(k);
+                }
+            }
+        } catch (e) {
+            this.isDismissed = false;
+            this.openCelebrationModal = true;
+        }
+    },
+    dismissAll() {
+        this.openCelebrationModal = false;
+        this.isDismissed = true;
+        try {
+            localStorage.setItem(this.storageKey, 'true');
+        } catch (e) {}
+    }
+}" 
+x-show="!isDismissed" 
+x-cloak 
+class="relative z-50">
+
+    <!-- Clean Top Trigger Bar -->
     <div class="bg-white border border-slate-200 rounded-none p-3 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3 mb-4">
         <div class="flex items-center gap-2.5">
             <span class="text-xl">🎉</span>
@@ -20,14 +55,22 @@
             </div>
         </div>
 
-        <button type="button" @click="openCelebrationModal = true" 
-                class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-none transition-colors shrink-0 flex items-center gap-1.5 shadow-xs">
-            <span>🎉 View Celebrations ({{ $totalCelebrations }})</span>
-        </button>
+        <div class="flex items-center gap-2 shrink-0">
+            <button type="button" @click="openCelebrationModal = true" 
+                    class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-none transition-colors shrink-0 flex items-center gap-1.5 shadow-xs">
+                <span>🎉 View Celebrations ({{ $totalCelebrations }})</span>
+            </button>
+            <button type="button" @click="dismissAll()" 
+                    class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-none transition-colors shrink-0 flex items-center gap-1 border border-slate-200"
+                    title="Dismiss alert for today">
+                <span>✕ Dismiss</span>
+            </button>
+        </div>
     </div>
 
-    <!-- POPUP MODAL (Opens only on click) -->
+    <!-- POPUP MODAL -->
     <div x-show="openCelebrationModal" 
+         @keydown.escape.window="dismissAll()"
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0"
          x-transition:enter-end="opacity-100"
@@ -36,7 +79,7 @@
          x-transition:leave-end="opacity-0"
          class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6">
         
-        <div @click.away="openCelebrationModal = false"
+        <div @click.away="dismissAll()"
              x-show="openCelebrationModal"
              x-transition:enter="transition ease-out duration-200"
              x-transition:enter-start="opacity-0 translate-y-2 sm:scale-95"
@@ -60,8 +103,9 @@
                     </div>
                 </div>
 
-                <button type="button" @click="openCelebrationModal = false" 
-                        class="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-none flex items-center justify-center transition-colors">
+                <button type="button" @click="dismissAll()" 
+                        class="w-7 h-7 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-none flex items-center justify-center transition-colors"
+                        title="Close and dismiss for today">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
@@ -101,9 +145,10 @@
                             </div>
                             @foreach($todayBirthdays as $user)
                                 @php
-                                    $cleanPhone = preg_replace('/[^0-9]/', '', $user->phone_no1);
+                                    $cleanPhone = \App\Services\CelebrationService::formatWhatsAppPhone($user->phone_no1);
                                     $age = $user->turning_age ?: ($user->date_of_birth ? now()->year - $user->date_of_birth->year : null);
-                                    $bdayUrl = $user->birthday_whatsapp_url ?? ($cleanPhone ? "https://wa.me/{$cleanPhone}?text=" . rawurlencode("Happy Birthday {$user->name}! 🎂 Wishing you a wonderful day from Jugnu Saloon.") : '#');
+                                    $bdayMsg = $user->birthday_wishing_message ?: "Happy Birthday {$user->name}! 🎂 Wishing you a wonderful day from Jugnu Saloon.";
+                                    $bdayUrl = $user->birthday_whatsapp_url ?? \App\Services\CelebrationService::buildWhatsAppUrl($user->phone_no1, $bdayMsg);
                                 @endphp
                                 <div class="p-3 bg-white border border-slate-200 rounded-none flex items-center justify-between gap-3 hover:bg-slate-50/70 transition-colors">
                                     <div class="flex items-center gap-3">
@@ -132,11 +177,13 @@
                                     </div>
 
                                     <!-- Action: WhatsApp Birthday Wish -->
-                                    @if($cleanPhone)
+                                    @if($bdayUrl)
                                         <a href="{{ $bdayUrl }}" target="_blank" 
                                            class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-none transition-colors flex items-center gap-1 shrink-0">
                                             <span>💬 Birthday Wish</span>
                                         </a>
+                                    @else
+                                        <span class="text-[10px] text-slate-400 italic">No valid phone</span>
                                     @endif
                                 </div>
                             @endforeach
@@ -153,9 +200,10 @@
                             </div>
                             @foreach($todayAnniversaries as $user)
                                 @php
-                                    $cleanPhone = preg_replace('/[^0-9]/', '', $user->phone_no1);
+                                    $cleanPhone = \App\Services\CelebrationService::formatWhatsAppPhone($user->phone_no1);
                                     $years = $user->anniversary_years ?: ($user->date_of_anniversary ? now()->year - $user->date_of_anniversary->year : null);
-                                    $annivUrl = $user->anniversary_whatsapp_url ?? ($cleanPhone ? "https://wa.me/{$cleanPhone}?text=" . rawurlencode("Happy Marriage Anniversary {$user->name}! 💍 Wishing you both endless happiness from Jugnu Saloon.") : '#');
+                                    $annivMsg = $user->anniversary_wishing_message ?: "Happy Marriage Anniversary {$user->name}! 💍 Wishing you both endless happiness from Jugnu Saloon.";
+                                    $annivUrl = $user->anniversary_whatsapp_url ?? \App\Services\CelebrationService::buildWhatsAppUrl($user->phone_no1, $annivMsg);
                                 @endphp
                                 <div class="p-3 bg-white border border-slate-200 rounded-none flex items-center justify-between gap-3 hover:bg-slate-50/70 transition-colors">
                                     <div class="flex items-center gap-3">
@@ -184,11 +232,13 @@
                                     </div>
 
                                     <!-- Action: WhatsApp Marriage Ceremony Wish -->
-                                    @if($cleanPhone)
+                                    @if($annivUrl)
                                         <a href="{{ $annivUrl }}" target="_blank" 
                                            class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-none transition-colors flex items-center gap-1 shrink-0">
                                             <span>💬 Marriage Wish</span>
                                         </a>
+                                    @else
+                                        <span class="text-[10px] text-slate-400 italic">No valid phone</span>
                                     @endif
                                 </div>
                             @endforeach
@@ -199,8 +249,9 @@
             </div>
 
             <!-- Simple Modal Footer -->
-            <div class="p-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end shrink-0">
-                <button type="button" @click="openCelebrationModal = false" 
+            <div class="p-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
+                <span class="text-[11px] text-slate-400 italic">Closing will dismiss this popup for today</span>
+                <button type="button" @click="dismissAll()" 
                         class="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-none transition-colors">
                     Close
                 </button>

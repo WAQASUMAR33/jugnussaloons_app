@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\AccountLedger;
 use App\Models\Product;
+use App\Models\ProductMainCategory;
+use App\Models\ProductStoreStock;
 use App\Models\Purchase;
 use App\Models\PurchaseItem;
 use App\Models\Setting;
@@ -16,14 +18,14 @@ use Illuminate\Support\Facades\DB;
 class PurchaseController extends Controller
 {
     /**
-     * Display a listing of purchases.
+     * Display a listing of purchases with main category support.
      */
     public function index(Request $request)
     {
         $search = $request->input('search');
-        $storeId = $request->input('store_id');
+        $mainCategoryId = $request->input('main_category_id');
 
-        $query = Purchase::with(['supplier.category', 'store', 'items.product.category']);
+        $query = Purchase::with(['supplier.category', 'mainCategory', 'items.product.category', 'items.product.mainCategory']);
 
         if ($search) {
             $query->where('invoice_no', 'like', "%{$search}%")
@@ -32,8 +34,8 @@ class PurchaseController extends Controller
                   });
         }
 
-        if ($storeId) {
-            $query->where('store_id', $storeId);
+        if ($mainCategoryId) {
+            $query->where('product_main_category_id', $mainCategoryId);
         }
 
         $purchases = $query->orderBy('created_at', 'desc')->paginate(10)->withQueryString();
@@ -44,12 +46,11 @@ class PurchaseController extends Controller
               ->orWhere('title', 'like', '%Vendor%');
         })->orderBy('name')->get();
 
-        $products = Product::with('storeStocks')->orderBy('title')->get();
-        $stores = Store::where('is_active', true)->orderBy('is_default', 'desc')->orderBy('name')->get();
-        $defaultStore = Store::getDefaultStore();
+        $mainCategories = ProductMainCategory::where('is_active', true)->orderBy('title')->get();
+        $products = Product::with(['mainCategory', 'category'])->orderBy('title')->get();
         $appSetting = Setting::first();
 
-        return view('manager.purchases.index', compact('purchases', 'suppliers', 'products', 'stores', 'defaultStore', 'search', 'storeId', 'appSetting'));
+        return view('manager.purchases.index', compact('purchases', 'suppliers', 'products', 'mainCategories', 'mainCategoryId', 'search', 'appSetting'));
     }
 
     /**
@@ -57,7 +58,7 @@ class PurchaseController extends Controller
      */
     public function print(Purchase $purchase)
     {
-        $purchase->load(['supplier.category', 'store', 'items.product.category']);
+        $purchase->load(['supplier.category', 'mainCategory', 'items.product.category', 'items.product.mainCategory']);
         $appSetting = Setting::first();
 
         return view('manager.purchases.print', compact('purchase', 'appSetting'));
@@ -70,7 +71,7 @@ class PurchaseController extends Controller
     {
         $validated = $request->validate([
             'account_id' => ['required', 'exists:accounts,id'],
-            'store_id' => ['nullable', 'exists:stores,id'],
+            'product_main_category_id' => ['required', 'exists:product_main_categories,id'],
             'purchase_date' => ['required', 'date'],
             'paid_amount' => ['required', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string', 'max:1000'],
@@ -85,7 +86,7 @@ class PurchaseController extends Controller
             $account = Account::findOrFail($validated['account_id']);
             $purchaseDate = $validated['purchase_date'];
             $paidAmount = (float) $validated['paid_amount'];
-            $storeId = !empty($validated['store_id']) ? (int) $validated['store_id'] : Store::getDefaultStore()->id;
+            $mainCategoryId = (int) $validated['product_main_category_id'];
 
             // Auto Generate Invoice Number
             $invoiceNo = 'PUR-' . date('Ym') . '-' . str_pad(Purchase::count() + 1, 4, '0', STR_PAD_LEFT);
@@ -101,7 +102,7 @@ class PurchaseController extends Controller
             $purchase = Purchase::create([
                 'invoice_no' => $invoiceNo,
                 'account_id' => $account->id,
-                'store_id' => $storeId,
+                'product_main_category_id' => $mainCategoryId,
                 'total_amount' => $totalAmount,
                 'paid_amount' => $paidAmount,
                 'balance_due' => $balanceDue,
@@ -110,6 +111,11 @@ class PurchaseController extends Controller
             ]);
 
             // 2. Create Line Items, Increment Stock & Update Product Sale Rate
+            $defaultStore = null;
+            try {
+                $defaultStore = Store::getDefaultStore();
+            } catch (\Throwable $e) {}
+
             foreach ($validated['items'] as $itemData) {
                 $subtotal = round((int) $itemData['quantity'] * (float) $itemData['unit_price'], 2);
                 
@@ -121,9 +127,9 @@ class PurchaseController extends Controller
                     'subtotal' => $subtotal,
                 ]);
 
-                // Increment Product Stock for Destination Store & Sync Total
+                // Increment Product Stock directly
                 $product = Product::findOrFail($itemData['product_id']);
-                $product->incrementStoreStock($storeId, (int) $itemData['quantity']);
+                $product->increment('stock', (int) $itemData['quantity']);
                 $product->purchase_price = (float) $itemData['unit_price'];
 
                 if (isset($itemData['sale_price']) && (float) $itemData['sale_price'] > 0) {
@@ -132,6 +138,16 @@ class PurchaseController extends Controller
                     $product->discounted_price = $product->calculateDiscountedPrice();
                 }
                 $product->save();
+
+                // Keep store stock synchronized in background if store exists
+                if ($defaultStore) {
+                    try {
+                        ProductStoreStock::updateOrCreate(
+                            ['product_id' => $product->id, 'store_id' => $defaultStore->id],
+                            ['stock' => $product->stock, 'low_stock' => $product->low_stock ?? 5]
+                        );
+                    } catch (\Throwable $e) {}
+                }
             }
 
             // 3. Write Purchase Ledger Entry (Debit/Credit)

@@ -10,6 +10,7 @@ use App\Http\Controllers\Manager\AppointmentController;
 use App\Http\Controllers\Manager\DashboardController as ManagerDashboardController;
 use App\Http\Controllers\Manager\GalleryController;
 use App\Http\Controllers\Manager\ProductCategoryController;
+use App\Http\Controllers\Manager\ProductMainCategoryController;
 use App\Http\Controllers\Manager\ProductController;
 use App\Http\Controllers\Manager\PurchaseController;
 use App\Http\Controllers\Manager\ReportController;
@@ -60,6 +61,8 @@ Route::middleware(['auth', 'role:manager,admin'])->prefix('manager')->name('mana
 
     // Products & Inventory Catalog
     Route::middleware('permission:manage-products,manage-product-categories')->group(function () {
+        Route::get('product-categories/subcategories', [ProductCategoryController::class, 'getSubCategories'])->name('product-categories.subcategories');
+        Route::resource('product-main-categories', ProductMainCategoryController::class)->except(['create', 'edit', 'show']);
         Route::resource('product-categories', ProductCategoryController::class)->except(['create', 'edit', 'show']);
         Route::resource('products', ProductController::class)->except(['create', 'edit', 'show']);
     });
@@ -99,6 +102,7 @@ Route::middleware(['auth', 'role:manager,admin'])->prefix('manager')->name('mana
     Route::middleware('permission:manage-appointments,book-appointment')->group(function () {
         Route::post('appointments/verify-admin-password', [AppointmentController::class, 'verifyAdminPassword'])->name('appointments.verify-admin-password');
         Route::get('appointments/create', [AppointmentController::class, 'create'])->name('appointments.create');
+        Route::get('appointments/upcoming', [AppointmentController::class, 'upcoming'])->name('appointments.upcoming');
         Route::get('appointments/{appointment}/edit', [AppointmentController::class, 'edit'])->name('appointments.edit');
         Route::resource('appointments', AppointmentController::class)->only(['index', 'store', 'update']);
         Route::patch('appointments/{appointment}/status', [AppointmentController::class, 'updateStatus'])->name('appointments.updateStatus');
@@ -160,6 +164,7 @@ Route::middleware(['auth', 'role:manager,admin'])->prefix('manager')->name('mana
         Route::get('ledger', [ReportController::class, 'ledger'])->name('ledger')->middleware('permission:view-ledger-reports,view-reports');
         Route::get('purchases', [ReportController::class, 'purchases'])->name('purchases')->middleware('permission:view-purchase-reports,view-reports');
         Route::get('profit', [ReportController::class, 'profit'])->name('profit')->middleware('permission:view-profit-report');
+        Route::get('aesthetic-profit', [ReportController::class, 'aestheticProfit'])->name('aesthetic-profit')->middleware('permission:view-profit-report');
         Route::get('day-closing', [ReportController::class, 'dayClosing'])->name('day-closing')->middleware('permission:manage-day-closing');
         Route::post('day-closing/save', [ReportController::class, 'saveDayClosing'])->name('day-closing.save')->middleware('permission:manage-day-closing');
     });

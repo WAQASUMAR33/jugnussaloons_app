@@ -38,7 +38,7 @@
             <!-- Brand & Welcome Header -->
             <div class="text-center space-y-2">
                 <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 mb-1">
-                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
                     </svg>
                 </div>
@@ -77,8 +77,8 @@
                             <!-- Mail SVG -->
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
                         </span>
-                        <input id="email" type="email" name="email" value="{{ old('email', 'admin@example.com') }}" required autofocus 
-                               placeholder="Enter your email"
+                        <input id="email" type="email" name="email" value="{{ old('email') }}" required autofocus 
+                               placeholder="Enter your email address"
                                class="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 focus:bg-white transition-all text-slate-900 placeholder-slate-400">
                     </div>
                 </div>
@@ -98,7 +98,7 @@
                             <!-- Lock SVG -->
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
                         </span>
-                        <input id="password" type="password" name="password" value="password" required 
+                        <input id="password" type="password" name="password" required 
                                placeholder="Enter your password"
                                class="w-full pl-10 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 focus:bg-white transition-all text-slate-900 placeholder-slate-400">
                         
@@ -114,7 +114,7 @@
                 <!-- Remember Me -->
                 <div class="flex items-center justify-between text-xs pt-1">
                     <label class="flex items-center gap-2 cursor-pointer select-none">
-                        <input type="checkbox" name="remember" checked class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4">
+                        <input type="checkbox" name="remember" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4">
                         <span class="font-medium text-slate-600">Keep me logged in</span>
                     </label>
                 </div>
@@ -132,52 +132,15 @@
                 </button>
             </form>
 
-            <!-- Quick Auto-Fill Credentials for Testing / Easy Login -->
-            <div class="pt-4 border-t border-slate-100 space-y-2">
-                <span class="block text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">
-                    Quick Demo Accounts (Click to Fill)
-                </span>
-                <div class="grid grid-cols-3 gap-2">
-                    <button type="button" onclick="fillCredentials('admin@example.com', 'password')"
-                            class="py-2 px-2.5 rounded-xl bg-slate-50 hover:bg-indigo-50 border border-slate-200/80 hover:border-indigo-200 text-left transition-colors cursor-pointer group">
-                        <div class="text-[11px] font-bold text-slate-800 group-hover:text-indigo-700">👑 Admin</div>
-                        <div class="text-[10px] text-slate-400 font-mono truncate">admin@example.com</div>
-                    </button>
-                    <button type="button" onclick="fillCredentials('manager@jugnu.com', 'password')"
-                            class="py-2 px-2.5 rounded-xl bg-slate-50 hover:bg-indigo-50 border border-slate-200/80 hover:border-indigo-200 text-left transition-colors cursor-pointer group">
-                        <div class="text-[11px] font-bold text-slate-800 group-hover:text-indigo-700">💼 Manager</div>
-                        <div class="text-[10px] text-slate-400 font-mono truncate">manager@jugnu.com</div>
-                    </button>
-                    <button type="button" onclick="fillCredentials('fatima@jugnu.com', 'password')"
-                            class="py-2 px-2.5 rounded-xl bg-slate-50 hover:bg-indigo-50 border border-slate-200/80 hover:border-indigo-200 text-left transition-colors cursor-pointer group">
-                        <div class="text-[11px] font-bold text-slate-800 group-hover:text-indigo-700">📋 Reception</div>
-                        <div class="text-[10px] text-slate-400 font-mono truncate">fatima@jugnu.com</div>
-                    </button>
-                </div>
-                <div class="text-center">
-                    <span class="text-[11px] text-slate-400">Default password for all accounts: <code class="px-1.5 py-0.5 bg-slate-100 rounded text-slate-700 font-bold">password</code></span>
-                </div>
-            </div>
-
         </div>
 
         <p class="text-center text-xs text-slate-400 font-medium">
-            &copy; {{ date('Y') }} Jugnu's Saloon &bull; Powered by Laravel & Material UI
+            &copy; {{ date('Y') }} Jugnu Saloon. All rights reserved.
         </p>
 
     </div>
 
     <script>
-        function fillCredentials(email, password) {
-            const emailInput = document.getElementById('email');
-            const passInput = document.getElementById('password');
-            if (emailInput && passInput) {
-                emailInput.value = email;
-                passInput.value = password;
-                emailInput.focus();
-            }
-        }
-
         // Vanilla password toggle
         const toggleBtn = document.getElementById('togglePasswordBtn');
         const passInput = document.getElementById('password');
