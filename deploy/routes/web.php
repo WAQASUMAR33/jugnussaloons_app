@@ -165,8 +165,10 @@ Route::middleware(['auth', 'role:manager,admin'])->prefix('manager')->name('mana
         Route::get('purchases', [ReportController::class, 'purchases'])->name('purchases')->middleware('permission:view-purchase-reports,view-reports');
         Route::get('profit', [ReportController::class, 'profit'])->name('profit')->middleware('permission:view-profit-report');
         Route::get('aesthetic-profit', [ReportController::class, 'aestheticProfit'])->name('aesthetic-profit')->middleware('permission:view-profit-report');
+        Route::get('day-closing/history', [ReportController::class, 'dayClosingHistory'])->name('day-closing.history')->middleware('permission:manage-day-closing');
         Route::get('day-closing', [ReportController::class, 'dayClosing'])->name('day-closing')->middleware('permission:manage-day-closing');
         Route::post('day-closing/save', [ReportController::class, 'saveDayClosing'])->name('day-closing.save')->middleware('permission:manage-day-closing');
+        Route::post('day-closing/set-opening', [ReportController::class, 'setOpeningBalance'])->name('day-closing.set-opening')->middleware('permission:manage-day-closing');
     });
 
     // Brand Identity & System Settings

@@ -1226,4 +1226,186 @@ class ReportController extends Controller
         return redirect()->route('manager.reports.day-closing', ['date' => $validated['closing_date']])
             ->with('success', $successMsg);
     }
+
+    /**
+     * Directly set or update the Starting Opening Balance for a specific calendar date
+     */
+    public function setOpeningBalance(Request $request)
+    {
+        if (!auth()->user()->hasRole('admin')) {
+            abort(403, 'Unauthorized. Daily Day Closing Report is restricted to Administrators only.');
+        }
+
+        $validated = $request->validate([
+            'date' => ['required', 'date'],
+            'opening_cash' => ['required', 'numeric', 'min:0'],
+            'opening_bank' => ['required', 'numeric', 'min:0'],
+        ]);
+
+        $cash = (float) $validated['opening_cash'];
+        $bank = (float) $validated['opening_bank'];
+        $total = $cash + $bank;
+
+        $record = DayClosing::where('closing_date', $validated['date'])->first();
+
+        if ($record) {
+            $record->opening_cash = $cash;
+            $record->opening_bank = $bank;
+            $record->total_opening = $total;
+
+            // Recalculate expected closing and discrepancy to guarantee consistency
+            if ($record->status !== 'open' || $record->closing_cash_expected > 0) {
+                $record->closing_cash_expected = $cash + (float) $record->net_cash_flow;
+                $record->closing_bank_expected = $bank + (float) $record->net_bank_flow;
+                $record->closing_total_expected = $total + (float) $record->total_net_flow;
+                if ($record->cash_actual_counted !== null) {
+                    $record->cash_difference = round((float) $record->cash_actual_counted - (float) $record->closing_cash_expected, 2);
+                }
+            }
+
+            $record->save();
+        } else {
+            DayClosing::create([
+                'closing_date' => $validated['date'],
+                'opening_cash' => $cash,
+                'opening_bank' => $bank,
+                'total_opening' => $total,
+                'status' => 'open',
+                'notes' => 'Starting opening balance directly initialized.',
+            ]);
+        }
+
+        return redirect()->route('manager.reports.day-closing', ['date' => $validated['date']])
+            ->with('success', 'Starting Opening Float for ' . \Carbon\Carbon::parse($validated['date'])->format('d M Y') . ' updated to Rs. ' . number_format($cash, 2) . ' (Cash) & Rs. ' . number_format($bank, 2) . ' (Bank)!');
+    }
+
+    /**
+     * Day Closing History & Comprehensive Register Audit Trail
+     */
+    public function dayClosingHistory(Request $request)
+    {
+        if (!auth()->user()->hasRole('admin') && !auth()->user()->hasPermission('manage-day-closing')) {
+            abort(403, 'Unauthorized. Daily Day Closing History is restricted to Administrators only.');
+        }
+
+        // Quick date presets
+        $preset = $request->input('preset', 'this_month');
+        $now = now();
+
+        switch ($preset) {
+            case 'today':
+                $startDate = $now->toDateString();
+                $endDate = $now->toDateString();
+                break;
+            case 'last_7_days':
+                $startDate = $now->copy()->subDays(6)->toDateString();
+                $endDate = $now->toDateString();
+                break;
+            case 'this_month':
+                $startDate = $now->copy()->startOfMonth()->toDateString();
+                $endDate = $now->copy()->endOfMonth()->toDateString();
+                break;
+            case 'last_month':
+                $startDate = $now->copy()->subMonth()->startOfMonth()->toDateString();
+                $endDate = $now->copy()->subMonth()->endOfMonth()->toDateString();
+                break;
+            case 'this_year':
+                $startDate = $now->copy()->startOfYear()->toDateString();
+                $endDate = $now->copy()->endOfYear()->toDateString();
+                break;
+            case 'all':
+                $startDate = null;
+                $endDate = null;
+                break;
+            case 'custom':
+            default:
+                $startDate = $request->input('start_date', $now->copy()->startOfMonth()->toDateString());
+                $endDate = $request->input('end_date', $now->toDateString());
+                break;
+        }
+
+        // Query builder
+        $query = DayClosing::with('closedBy');
+
+        if ($startDate && $endDate) {
+            $query->whereBetween('closing_date', [$startDate, $endDate]);
+        } elseif ($startDate) {
+            $query->where('closing_date', '>=', $startDate);
+        } elseif ($endDate) {
+            $query->where('closing_date', '<=', $endDate);
+        }
+
+        // Status filter
+        $status = $request->input('status', 'all');
+        if ($status && $status !== 'all') {
+            $query->where('status', $status);
+        }
+
+        // Discrepancy filter
+        $discrepancy = $request->input('discrepancy', 'all');
+        if ($discrepancy === 'balanced') {
+            $query->where('cash_difference', 0);
+        } elseif ($discrepancy === 'shortage') {
+            $query->where('cash_difference', '<', 0);
+        } elseif ($discrepancy === 'surplus') {
+            $query->where('cash_difference', '>', 0);
+        } elseif ($discrepancy === 'has_diff') {
+            $query->where('cash_difference', '!=', 0);
+        }
+
+        // Search filter (notes or closedBy user name)
+        $search = trim($request->input('search', ''));
+        if ($search !== '') {
+            $query->where(function($q) use ($search) {
+                $q->where('notes', 'like', "%{$search}%")
+                  ->orWhereHas('closedBy', function($uq) use ($search) {
+                      $uq->where('name', 'like', "%{$search}%");
+                  });
+            });
+        }
+
+        // Calculate KPI summary figures across all matched records (unpaginated)
+        $summaryQuery = clone $query;
+        $allMatched = $summaryQuery->get();
+
+        $metrics = [
+            'total_days' => $allMatched->count(),
+            'closed_days' => $allMatched->whereIn('status', ['closed', 'verified'])->count(),
+            'open_days' => $allMatched->where('status', 'open')->count(),
+            'total_opening' => (float) $allMatched->sum('total_opening'),
+            'total_received' => (float) $allMatched->sum('total_received'),
+            'cash_received' => (float) $allMatched->sum('cash_received'),
+            'bank_received' => (float) $allMatched->sum('bank_received'),
+            'total_paid' => (float) $allMatched->sum('total_paid'),
+            'cash_paid' => (float) $allMatched->sum('cash_paid'),
+            'bank_paid' => (float) $allMatched->sum('bank_paid'),
+            'net_flow' => (float) $allMatched->sum('total_net_flow'),
+            'closing_cash_expected' => (float) $allMatched->sum('closing_cash_expected'),
+            'closing_bank_expected' => (float) $allMatched->sum('closing_bank_expected'),
+            'closing_total_expected' => (float) $allMatched->sum('closing_total_expected'),
+            'cash_actual_counted' => (float) $allMatched->sum('cash_actual_counted'),
+            'balanced_days' => $allMatched->where('cash_difference', 0)->count(),
+            'shortage_days' => $allMatched->where('cash_difference', '<', 0)->count(),
+            'surplus_days' => $allMatched->where('cash_difference', '>', 0)->count(),
+            'total_shortage' => (float) abs($allMatched->where('cash_difference', '<', 0)->sum('cash_difference')),
+            'total_surplus' => (float) $allMatched->where('cash_difference', '>', 0)->sum('cash_difference'),
+        ];
+
+        // Paginate records ordered by closing_date DESC
+        $closings = $query->orderBy('closing_date', 'desc')->paginate(25)->withQueryString();
+
+        $appSetting = \App\Models\Setting::first();
+
+        return view('manager.reports.day_closing_history', compact(
+            'closings',
+            'metrics',
+            'startDate',
+            'endDate',
+            'preset',
+            'status',
+            'discrepancy',
+            'search',
+            'appSetting'
+        ));
+    }
 }

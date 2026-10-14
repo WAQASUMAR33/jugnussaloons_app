@@ -583,15 +583,30 @@
                     @if(Auth::user()->hasRole('admin') || Auth::user()->hasPermission('manage-day-closing'))
                     <a href="{{ route('manager.reports.day-closing') }}" 
                        x-show="!menuQuery || 'day closing daily register cash bank balance reconciliation settlement'.includes(menuQuery.toLowerCase())"
-                       class="flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 group {{ request()->routeIs('manager.reports.day-closing*') ? 'bg-teal-600 text-white shadow-md shadow-teal-100 font-extrabold' : 'text-slate-700 hover:bg-slate-100 hover:text-teal-600' }}">
+                       class="flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 group {{ request()->routeIs('manager.reports.day-closing') && !request()->routeIs('manager.reports.day-closing.history') ? 'bg-teal-600 text-white shadow-md shadow-teal-100 font-extrabold' : 'text-slate-700 hover:bg-slate-100 hover:text-teal-600' }}">
                         <div class="flex items-center gap-3">
-                            <div class="p-1.5 rounded-lg {{ request()->routeIs('manager.reports.day-closing*') ? 'bg-white/20 text-white' : 'bg-teal-50 text-teal-600 group-hover:scale-105' }} transition-transform">
+                            <div class="p-1.5 rounded-lg {{ request()->routeIs('manager.reports.day-closing') && !request()->routeIs('manager.reports.day-closing.history') ? 'bg-white/20 text-white' : 'bg-teal-50 text-teal-600 group-hover:scale-105' }} transition-transform">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                             </div>
                             <span>Day Closing</span>
                         </div>
-                        <span class="px-1.5 py-0.5 rounded-md text-[10px] font-black {{ request()->routeIs('manager.reports.day-closing*') ? 'bg-white/20 text-white' : 'bg-teal-100 text-teal-800' }}">
+                        <span class="px-1.5 py-0.5 rounded-md text-[10px] font-black {{ request()->routeIs('manager.reports.day-closing') && !request()->routeIs('manager.reports.day-closing.history') ? 'bg-white/20 text-white' : 'bg-teal-100 text-teal-800' }}">
                             Daily
+                        </span>
+                    </a>
+
+                    <!-- Day Closing History Direct Button -->
+                    <a href="{{ route('manager.reports.day-closing.history') }}" 
+                       x-show="!menuQuery || 'day closing history previous records register audit trail log'.includes(menuQuery.toLowerCase())"
+                       class="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all duration-200 group {{ request()->routeIs('manager.reports.day-closing.history') ? 'bg-teal-600 text-white shadow-md shadow-teal-100 font-extrabold' : 'text-slate-700 hover:bg-slate-100 hover:text-teal-600' }}">
+                        <div class="flex items-center gap-3">
+                            <div class="p-1.5 rounded-lg {{ request()->routeIs('manager.reports.day-closing.history') ? 'bg-white/20 text-white' : 'bg-teal-50 text-teal-600 group-hover:scale-105' }} transition-transform">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            </div>
+                            <span>Closing History</span>
+                        </div>
+                        <span class="px-1.5 py-0.5 rounded-md text-[10px] font-black {{ request()->routeIs('manager.reports.day-closing.history') ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700' }}">
+                            History
                         </span>
                     </a>
                     @endif
@@ -880,9 +895,15 @@
                         @if(Auth::user()->hasRole('admin') || Auth::user()->hasPermission('manage-day-closing'))
                         <a href="{{ route('manager.reports.day-closing') }}" 
                            x-show="!menuQuery || $el.innerText.toLowerCase().includes(menuQuery.toLowerCase())"
-                           class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all {{ request()->routeIs('manager.reports.day-closing*') ? 'bg-teal-600 text-white font-extrabold shadow-sm' : 'text-slate-600 hover:text-teal-600 hover:bg-teal-50/70' }}">
-                            <span class="w-1.5 h-1.5 rounded-full {{ request()->routeIs('manager.reports.day-closing*') ? 'bg-white' : 'bg-slate-300' }}"></span>
+                           class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all {{ request()->routeIs('manager.reports.day-closing') && !request()->routeIs('manager.reports.day-closing.history') ? 'bg-teal-600 text-white font-extrabold shadow-sm' : 'text-slate-600 hover:text-teal-600 hover:bg-teal-50/70' }}">
+                            <span class="w-1.5 h-1.5 rounded-full {{ request()->routeIs('manager.reports.day-closing') && !request()->routeIs('manager.reports.day-closing.history') ? 'bg-white' : 'bg-slate-300' }}"></span>
                             <span>Day Closing & Cash</span>
+                        </a>
+                        <a href="{{ route('manager.reports.day-closing.history') }}" 
+                           x-show="!menuQuery || $el.innerText.toLowerCase().includes(menuQuery.toLowerCase())"
+                           class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold transition-all {{ request()->routeIs('manager.reports.day-closing.history') ? 'bg-teal-600 text-white font-extrabold shadow-sm' : 'text-slate-600 hover:text-teal-600 hover:bg-teal-50/70' }}">
+                            <span class="w-1.5 h-1.5 rounded-full {{ request()->routeIs('manager.reports.day-closing.history') ? 'bg-white' : 'bg-slate-300' }}"></span>
+                            <span>Closing History</span>
                         </a>
                         @endif
 

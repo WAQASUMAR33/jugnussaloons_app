@@ -4,6 +4,7 @@
 
 @section('content')
 <div class="space-y-6 pb-12" x-data="{
+    openingModalOpen: false,
     activeTab: 'statement',
     // Denominations for physical drawer cash counting
     denom: {
@@ -180,8 +181,11 @@
 
         <!-- Reports Tabs -->
         <div class="flex border-b border-slate-200 overflow-x-auto scrollbar-none gap-2 text-xs font-bold pb-0.5">
-            <a href="{{ route('manager.reports.day-closing') }}" class="py-3 px-4 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap {{ request()->routeIs('manager.reports.day-closing') ? 'border-teal-600 text-teal-700 bg-teal-50/50 font-extrabold' : 'border-transparent text-slate-500 hover:text-slate-900' }}">
+            <a href="{{ route('manager.reports.day-closing') }}" class="py-3 px-4 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap {{ request()->routeIs('manager.reports.day-closing') && !request()->routeIs('manager.reports.day-closing.history') ? 'border-teal-600 text-teal-700 bg-teal-50/50 font-extrabold' : 'border-transparent text-slate-500 hover:text-slate-900' }}">
                 <span>📅 Day Closing</span>
+            </a>
+            <a href="{{ route('manager.reports.day-closing.history') }}" class="py-3 px-4 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap {{ request()->routeIs('manager.reports.day-closing.history') ? 'border-teal-600 text-teal-700 bg-teal-50/50 font-extrabold' : 'border-transparent text-slate-500 hover:text-slate-900' }}">
+                <span>📜 Closing History</span>
             </a>
             <a href="{{ route('manager.reports.profit') }}" class="py-3 px-4 flex items-center gap-2 border-b-2 transition-all whitespace-nowrap {{ request()->routeIs('manager.reports.profit') ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50 font-extrabold' : 'border-transparent text-slate-500 hover:text-slate-900' }}">
                 <span>💰 Profit & Loss</span>
@@ -547,9 +551,16 @@
                             <p class="text-[11px] text-slate-500 font-medium">Daily starting register and vault float position</p>
                         </div>
                     </div>
-                    <div class="text-right">
-                        <span class="text-xs text-slate-400 font-bold uppercase">Total Opening</span>
-                        <div class="text-lg font-black text-indigo-950 heading-font">Rs. {{ number_format($totalOpening, 2) }}</div>
+                    <div class="flex items-center gap-3">
+                        <div class="text-right">
+                            <span class="text-xs text-slate-400 font-bold uppercase">Total Opening</span>
+                            <div class="text-lg font-black text-indigo-950 heading-font">Rs. {{ number_format($totalOpening, 2) }}</div>
+                        </div>
+                        <button type="button" @click="openingModalOpen = true"
+                                class="inline-flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-xs transition-colors cursor-pointer">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                            <span>Set / Edit Opening</span>
+                        </button>
                     </div>
                 </div>
 
@@ -1679,6 +1690,68 @@
             </div>
         </div>
 
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SET / EDIT OPENING BALANCE MODAL (WEB ONLY)                               -->
+    <!-- ========================================================================= -->
+    <div x-show="openingModalOpen" 
+         x-cloak 
+         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs print:hidden"
+         @keydown.escape.window="openingModalOpen = false">
+        <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5"
+             @click.away="openingModalOpen = false">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-lg">
+                        💵
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-black text-slate-900 heading-font">Set Starting Opening Float</h3>
+                        <p class="text-[10px] text-slate-500 font-medium">For {{ \Carbon\Carbon::parse($date)->format('l, d M Y') }}</p>
+                    </div>
+                </div>
+                <button type="button" @click="openingModalOpen = false" class="text-slate-400 hover:text-slate-600 font-black text-lg p-1 cursor-pointer">
+                    ✕
+                </button>
+            </div>
+
+            <form action="{{ route('manager.reports.day-closing.set-opening') }}" method="POST" class="space-y-4">
+                @csrf
+                <input type="hidden" name="date" value="{{ $date }}">
+
+                <div class="space-y-1.5">
+                    <label class="block text-xs font-black text-slate-800">Starting Cash In Hand (Drawer Float):</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 font-bold text-xs">Rs.</span>
+                        <input type="number" step="0.01" min="0" name="opening_cash" value="{{ $openingCash }}" required
+                               class="w-full pl-12 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-black text-sm text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <p class="text-[10.5px] text-slate-500">The petty cash float present in the cash drawer at the start of business.</p>
+                </div>
+
+                <div class="space-y-1.5">
+                    <label class="block text-xs font-black text-slate-800">Starting Bank / Digital Vault Balance:</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 font-bold text-xs">Rs.</span>
+                        <input type="number" step="0.01" min="0" name="opening_bank" value="{{ $openingBank }}" required
+                               class="w-full pl-12 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-black text-sm text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <p class="text-[10.5px] text-slate-500">Initial bank balance carried into the morning.</p>
+                </div>
+
+                <div class="pt-2 flex items-center justify-end gap-2.5 border-t border-slate-100">
+                    <button type="button" @click="openingModalOpen = false"
+                            class="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer">
+                        Cancel
+                    </button>
+                    <button type="submit"
+                            class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl shadow-md shadow-indigo-600/20 transition-all cursor-pointer">
+                        Save Opening Float
+                    </button>
+                </div>
+            </form>
+        </div>
     </div>
 
 </div>
